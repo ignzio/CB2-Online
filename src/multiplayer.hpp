@@ -46,6 +46,9 @@ public:
     uint32_t levelId() const { return level; }
     // The console was rewound by a loaded save state: forget everything tracked about the game's objects (they are all different now).
     void stateLoaded(uint32_t levelNow);
+    const std::string& selfName() const { return playerName; }
+    int opacity = 100;                                         // how solid the other players' Crashes are drawn (percent, 10..100)
+    double levelSeconds() const { return double(p.frames - levelStartFrame) / 59.94; }   // game time in the current level (stands still while paused)
     bool showTags = true;                                      // the pause menu's "Name tags"
 
     // Addresses in the executable
@@ -87,6 +90,7 @@ private:
     uint64_t playerSince = 0;              // frame the current player object was first seen
     uint32_t level = 0xFF;                 // level the game has loaded (0xFF = unknown)
     uint64_t managedFrame = ~0ull, lastScan = 0;
+    uint64_t levelStartFrame = 0;          // frame in which the current level was opened
     uint32_t stepping = 0;                 // object being updated right now
     Puppet* steppingPuppet = nullptr;
     std::vector<r3000::GteSample> samples;   // every vertex the game projects while puppets exist (to find where they are on screen)

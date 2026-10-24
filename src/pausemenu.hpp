@@ -1,8 +1,14 @@
 #pragma once
-// The in-game menu (Esc): volume, display options, keyboard bindings, back to the main menu, quit. It is drawn over the frozen game picture
-// with the same look as the online lobby (ui.hpp). The game is paused while it is open; settings are saved by the caller (changed()).
-#include <functional>
+// The in-game menu (Esc). It is drawn over the frozen game picture with the same look as the online lobby (ui.hpp); the game is paused while it
+// is open and the caller saves the settings when changed() says so.
+//   Main              Resume / Sound and picture / Online (online play only) / Controls / Main menu / Quit
+//   Sound and picture volume slider, display filter, fullscreen
+//   Online            name tags, how solid the other players are (slider), the player list at the right edge
+//   Controls          keyboard and game pad bindings side by side; Enter binds the column under the cursor, a game pad button or key is then pressed
+// Keyboard, game pad and mouse all work: arrows / D-pad / hover to pick, Enter / A / click to choose, Left / Right / drag to move a slider, Esc / B /
+// right click to go back.
 #include <cctype>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -17,7 +23,9 @@ struct Settings {
     int volume = 100;        // 0..100
     int filter = 2;          // 0 nearest, 1 bilinear, 2 sharp bilinear
     bool nameTags = true;    // names over the other players (online)
-    cb2input::Keys keys;
+    int opacity = 100;       // how solid the other players' Crashes are, 10..100
+    bool roster = true;      // the player list at the right edge (online)
+    cb2input::Keys keys;     // keyboard and game pad bindings
 };
 
 enum class Result { None, MainMenu, Quit };
@@ -25,18 +33,25 @@ enum class Result { None, MainMenu, Quit };
 class PauseMenu {
 public:
     struct Context {
-        bool online = false;                          // shows the online-only rows
+        bool online = false;                          // shows the online-only page
         std::function<bool()> isFullscreen;
         std::function<void()> toggleFullscreen;
     };
 
     bool init(Settings* settings, const Context& context);   // needs the OpenGL context
     void open();
-    void close() { page = Page::Closed; }
+    void close() { page = Page::Closed; dragging = -1; }
     bool isOpen() const { return page != Page::Closed; }
     // A key press / repeat from the window's key callback while the menu is open (GLFW key code, GLFW action).
     void key(int glfwKey, int action);
-    // Scripted input for tests: up down left right enter esc del, or key:NAME. Returns false for anything else.
+    // True while the menu waits for a game pad button to bind: the caller then passes every newly pressed button to padButton instead of using it to navigate.
+    bool capturingPad() const { return page == Page::Capture && column == 1; }
+    void padButton(int padCode);
+    // Mouse: position in the menu's 640 x 480 coordinates (outside the picture: anything outside 0..640 / 0..480), left button state; wheel in notches.
+    void mouse(float x, float y, bool leftDown);
+    void rightClick() { key(256 /* GLFW_KEY_ESCAPE */, 1 /* GLFW_PRESS */); }
+    void wheel(float notches);
+    // Scripted input for tests: up down left right enter esc del, key:NAME, pad:NAME, move:x/y, click:x/y, drag:x/y (the button stays down for the following moves) and release. Returns false for anything else.
     bool script(const std::string& token);
     Result takeResult() { const Result r = result; result = Result::None; return r; }
     bool takeChanged() { const bool c = changed; changed = false; return c; }
@@ -47,27 +62,40 @@ public:
         for (char& c : toastText) c = char(std::toupper(static_cast<unsigned char>(c)));   // the font has capitals only
         toastUntil = seconds + 2.0;
     }
+    cb2ui::Canvas& surface() { return canvas; }   // for the overlay (hud.hpp), which draws with the same font
 
 private:
-    enum class Page { Closed, Main, Controls, Capture, ConfirmMenu, ConfirmQuit };
-    enum Item { kResume, kControls, kVolume, kFilter, kFullscreen, kTags, kMainMenu, kQuit };
+    enum class Page { Closed, Main, Sound, Online, Controls, Capture, ConfirmMenu, ConfirmQuit };
+    enum Item { kResume, kSound, kOnline, kControls, kMainMenu, kQuit, kVolume, kFilter, kFullscreen, kTags, kOpacity, kRoster, kBack };
+    struct Hit { float x, y, w, h; int index; };
 
     cb2ui::Canvas canvas;
     Settings* s = nullptr;
     Context ctx;
     Page page = Page::Closed;
-    int sel = 0, controlsSel = 0, confirmSel = 1;
+    int sel = 0, mainSel = 0, controlsSel = 0, confirmSel = 1, column = 0;   // column: 0 keyboard, 1 game pad (Controls page)
     bool changed = false;
     Result result = Result::None;
     std::string message;
     double messageUntil = 0, now = 0;
     std::string toastText;
     double toastUntil = 0;
+    // mouse
+    float mx = -1, my = -1, lastMx = -1, lastMy = -1;
+    bool mouseDown = false, scriptDown = false;
+    int dragging = -1;                 // item whose slider is being dragged
+    std::vector<Hit> hits;             // the clickable areas of the page, rebuilt by draw()
+    float barX = 0, barW = 0;          // the slider bar of the rows (same for all rows)
 
     std::vector<Item> items() const;
+    void setPage(Page p);
     void adjust(Item item, int direction);
+    void setSlider(Item item, float x);
     void activate(Item item);
+    void startCapture(int row, int col) { controlsSel = row; column = col; page = Page::Capture; message.clear(); }
     void move(int& index, int count, int direction) { index = (index + count + direction) % count; }
+    int hitAt(float x, float y) const;
+    static bool isSlider(Item i) { return i == kVolume || i == kOpacity; }
 };
 
 }  // namespace cb2menu

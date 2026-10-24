@@ -54,6 +54,7 @@ void Gpu::recordTri(const Vtx& a, const Vtx& b, const Vtx& c, bool textured, boo
     g.twMX = uint8_t(twMaskX); g.twMY = uint8_t(twMaskY); g.twOX = uint8_t(twOffX); g.twOY = uint8_t(twOffY);
     g.clutX = uint16_t(clutX); g.clutY = uint16_t(clutY);
     g.area[0] = int16_t(areaX0); g.area[1] = int16_t(areaY0); g.area[2] = int16_t(areaX1); g.area[3] = int16_t(areaY1);
+    if (alphaValue < 255 && !alphaKeys.empty() && !semiOn && alphaKeys.count(alphaKey(g.x[0], g.y[0])) && alphaKeys.count(alphaKey(g.x[1], g.y[1])) && alphaKeys.count(alphaKey(g.x[2], g.y[2]))) g.alpha = alphaValue;
     cmds.push_back(g);
 }
 

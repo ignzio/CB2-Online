@@ -28,6 +28,8 @@
 #include "updater.hpp"
 #include "discimport.hpp"
 #include "savestate.hpp"
+#include "hud.hpp"
+#include "roster.hpp"
 #include "psx.hpp"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -42,6 +44,10 @@ namespace {
 #endif
 
 cb2menu::PauseMenu* gMenu = nullptr;   // the key callback needs it
+
+void onScroll(GLFWwindow*, double, double dy) {
+    if (gMenu && gMenu->isOpen()) gMenu->wheel(float(dy));
+}
 
 void onKeyEvent(GLFWwindow*, int key, int, int action, int) {
     if (!gMenu) return;
@@ -91,20 +97,18 @@ uint16_t readPad(GLFWwindow* win, const cb2input::Keys& keys) {
         if (keys.key[i] && glfwGetKey(win, keys.key[i]) == GLFW_PRESS) pad &= uint16_t(~cb2input::kBindings[i].bit);
     GLFWgamepadstate gp;
     if (glfwJoystickIsGamepad(GLFW_JOYSTICK_1) && glfwGetGamepadState(GLFW_JOYSTICK_1, &gp)) {
-        struct Map { int button; uint16_t bit; };
-        static const Map buttons[] = {
-            {GLFW_GAMEPAD_BUTTON_A, 1u << 14}, {GLFW_GAMEPAD_BUTTON_B, 1u << 13}, {GLFW_GAMEPAD_BUTTON_X, 1u << 15},
-            {GLFW_GAMEPAD_BUTTON_Y, 1u << 12}, {GLFW_GAMEPAD_BUTTON_LEFT_BUMPER, 1u << 10}, {GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER, 1u << 11},
-            {GLFW_GAMEPAD_BUTTON_BACK, 1u << 0}, {GLFW_GAMEPAD_BUTTON_START, 1u << 3}, {GLFW_GAMEPAD_BUTTON_DPAD_UP, 1u << 4},
-            {GLFW_GAMEPAD_BUTTON_DPAD_RIGHT, 1u << 5}, {GLFW_GAMEPAD_BUTTON_DPAD_DOWN, 1u << 6}, {GLFW_GAMEPAD_BUTTON_DPAD_LEFT, 1u << 7}};
-        for (const Map& m : buttons) if (gp.buttons[m.button]) pad &= uint16_t(~m.bit);
+        // the game pad buttons are bound in the menu (Controls); the left stick always works as the D-pad
+        for (int i = 0; i < cb2input::kBindingCount; ++i) {
+            const int code = keys.pad[i];
+            if (code == cb2input::kPadNone) continue;
+            const bool down = code >= cb2input::kPadAxisBase ? gp.axes[code - cb2input::kPadAxisBase] > 0.5f : (code >= 0 && code <= GLFW_GAMEPAD_BUTTON_LAST && gp.buttons[code]);
+            if (down) pad &= uint16_t(~cb2input::kBindings[i].bit);
+        }
         const float lx = gp.axes[GLFW_GAMEPAD_AXIS_LEFT_X], ly = gp.axes[GLFW_GAMEPAD_AXIS_LEFT_Y];
         if (lx < -0.5f) pad &= uint16_t(~(1u << 7));
         if (lx > 0.5f) pad &= uint16_t(~(1u << 5));
         if (ly < -0.5f) pad &= uint16_t(~(1u << 4));
         if (ly > 0.5f) pad &= uint16_t(~(1u << 6));
-        if (gp.axes[GLFW_GAMEPAD_AXIS_LEFT_TRIGGER] > 0.5f) pad &= uint16_t(~(1u << 8));
-        if (gp.axes[GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER] > 0.5f) pad &= uint16_t(~(1u << 9));
     }
     return pad;
 }
@@ -389,7 +393,9 @@ int main(int argc, char** argv) {
     settings.volume = cfg.volume;
     settings.filter = cfg.filter;
     settings.nameTags = cfg.nameTags;
-    settings.keys.load(cfg.keyNames);
+    settings.opacity = cfg.opacity;
+    settings.roster = cfg.roster;
+    settings.keys.load(cfg.keyNames, cfg.padNames);
     psx::AudioOut audio;
     if (audio.start(44100)) p.spu.sink = [&](int16_t l, int16_t r) {
         const int gain = settings.volume * settings.volume;   // 0..10000: a quadratic curve sounds more even than a linear one
@@ -398,7 +404,10 @@ int main(int argc, char** argv) {
     else std::fprintf(stderr, "no audio device; continuing silently\n");
     std::vector<uint32_t> rgba(1024 * 512, 0xFF000000u);
     int shot = 0;
-    bool f1Down = false, f2Down = false, f11Down = false, f5Down = false, f6Down = false, f9Down = false;
+    bool f1Down = false, f2Down = false, f11Down = false, f5Down = false, f6Down = false, f9Down = false, f3Down = false, rightWas = false;
+    cb2hud::Hud hud;
+    cb2roster::Roster roster;
+    std::vector<cb2roster::Event> rosterEvents;
     uint64_t lastTitle = 0;
     auto toggleFullscreen = [&] {
         if (glfwGetWindowMonitor(win)) glfwSetWindowMonitor(win, nullptr, 100, 100, 960, 720, 0);
@@ -416,6 +425,7 @@ int main(int argc, char** argv) {
         if (!menu.init(&settings, mc)) std::fprintf(stderr, "the in-game menu could not start\n");
         gMenu = &menu;
         glfwSetKeyCallback(win, onKeyEvent);
+        glfwSetScrollCallback(win, onScroll);
     }
     bool wasPaused = false, suppressPad = false, relaunch = false, padPrimed = false;
     size_t menuPos = 0;
@@ -434,7 +444,12 @@ int main(int argc, char** argv) {
         cfg.remember(exeDir, "volume", std::to_string(settings.volume));
         cfg.remember(exeDir, "filter", std::to_string(settings.filter));
         cfg.remember(exeDir, "nametags", settings.nameTags ? "on" : "off");
-        for (int i = 0; i < cb2input::kBindingCount; ++i) cfg.remember(exeDir, std::string("key_") + cb2input::kBindings[i].id, cb2input::keyName(settings.keys.key[i]));
+        cfg.remember(exeDir, "opacity", std::to_string(settings.opacity));
+        cfg.remember(exeDir, "roster", settings.roster ? "on" : "off");
+        for (int i = 0; i < cb2input::kBindingCount; ++i) {
+            cfg.remember(exeDir, std::string("key_") + cb2input::kBindings[i].id, cb2input::keyName(settings.keys.key[i]));
+            cfg.remember(exeDir, std::string("pad_") + cb2input::kBindings[i].id, cb2input::padName(settings.keys.pad[i]));
+        }
     };
 
     auto padNow = [&]() {
@@ -505,9 +520,34 @@ int main(int argc, char** argv) {
             // The game is frozen. The network keeps running (we keep announcing the state we froze in) so that the others do not drop us.
             wasPaused = true;
             glfwPollEvents();
+            if (menuScript.empty()) {   // the real mouse (scripted tests move a pretend one)
+                double cx = 0, cy = 0;
+                int ww = 1, wh = 1;
+                glfwGetCursorPos(win, &cx, &cy);
+                glfwGetWindowSize(win, &ww, &wh);
+                int vw = ww, vh = ww * 3 / 4;
+                if (vh > wh) { vh = wh; vw = wh * 4 / 3; }
+                const float ux = (float(cx) - float(ww - vw) * 0.5f) / float(std::max(1, vw)) * cb2ui::kW, uy = (float(cy) - float(wh - vh) * 0.5f) / float(std::max(1, vh)) * cb2ui::kH;
+                menu.mouse(ux, uy, glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
+                const bool right = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+                if (right && !rightWas) menu.rightClick();
+                rightWas = right;
+            }
             GLFWgamepadstate gp;
             static bool padWas[5] = {};
+            static bool allWas[17] = {};
             if (menuScript.empty() && glfwJoystickIsGamepad(GLFW_JOYSTICK_1) && glfwGetGamepadState(GLFW_JOYSTICK_1, &gp)) {
+                // binding a button: any newly pressed button or trigger goes to the menu instead of moving in it
+                bool allNow[17] = {};
+                for (int b = 0; b <= GLFW_GAMEPAD_BUTTON_LAST; ++b) allNow[b] = gp.buttons[b];
+                allNow[15] = gp.axes[GLFW_GAMEPAD_AXIS_LEFT_TRIGGER] > 0.5f;
+                allNow[16] = gp.axes[GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER] > 0.5f;
+                const bool capturingPad = menu.capturingPad();
+                if (capturingPad && padPrimed) {
+                    for (int i = 0; i < 17; ++i)
+                        if (allNow[i] && !allWas[i]) { menu.padButton(i < 15 ? i : cb2input::kPadAxisBase + (i == 15 ? GLFW_GAMEPAD_AXIS_LEFT_TRIGGER : GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER)); break; }
+                }
+                for (int i = 0; i < 17; ++i) allWas[i] = allNow[i];
                 const bool now[5] = {bool(gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_UP]) || gp.axes[GLFW_GAMEPAD_AXIS_LEFT_Y] < -0.6f, bool(gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_DOWN]) || gp.axes[GLFW_GAMEPAD_AXIS_LEFT_Y] > 0.6f,
                                      bool(gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_LEFT]) || gp.axes[GLFW_GAMEPAD_AXIS_LEFT_X] < -0.6f, bool(gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_RIGHT]) || gp.axes[GLFW_GAMEPAD_AXIS_LEFT_X] > 0.6f,
                                      bool(gp.buttons[GLFW_GAMEPAD_BUTTON_A])};
@@ -515,7 +555,7 @@ int main(int argc, char** argv) {
                 static bool bWas = false;
                 const bool b = gp.buttons[GLFW_GAMEPAD_BUTTON_B];
                 // whatever is already held when the menu opens does not count as a press
-                if (padPrimed) {
+                if (padPrimed && !capturingPad) {
                     for (int i = 0; i < 5; ++i) if (now[i] && !padWas[i]) menu.key(keysFor[i], GLFW_PRESS);
                     if (b && !bWas) menu.key(GLFW_KEY_ESCAPE, GLFW_PRESS);
                 }
@@ -551,6 +591,18 @@ int main(int argc, char** argv) {
             break;
         }
         mp.showTags = settings.nameTags;
+        mp.opacity = settings.opacity;
+        if (mp.active()) {
+            roster.update(mp.others(), glfwGetTime(), rosterEvents);
+            for (const cb2roster::Event& e : rosterEvents) {
+                using K = cb2roster::EventKind;
+                if (e.kind == K::Joined) hud.notice(e.name + " JOINED THE ROOM", cb2ui::kGreen, glfwGetTime());
+                else if (e.kind == K::Left) hud.notice(e.name + " LEFT THE ROOM", cb2ui::kRed, glfwGetTime());
+                else if (e.kind == K::EnteredLevel) hud.notice(e.name + " ENTERED " + cb2roster::levelName(e.level), cb2ui::kTeal, glfwGetTime());
+                else hud.notice(e.name + " LEFT " + cb2roster::levelName(e.level) + "  " + cb2roster::formatTime(e.seconds), cb2ui::rgb(255, 176, 80), glfwGetTime());
+            }
+            rosterEvents.clear();
+        }
         if (captureAfterPuppet && mp.puppetCount() > 0 && !puppetSince) puppetSince = p.frames;
         const bool captureNow = captureFrame && p.frames >= captureFrame && (!captureAfterPuppet || (puppetSince && p.frames >= puppetSince + captureAfterPuppet));
         if (!paused) {
@@ -609,6 +661,28 @@ int main(int argc, char** argv) {
         glBindVertexArray(vao);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         menu.draw(glfwGetTime());
+        if (mp.active() && !menu.isOpen()) {
+            std::vector<cb2hud::Row> rows;
+            cb2hud::Row self;
+            self.name = mp.selfName();
+            self.rgb = 0xFFD040;
+            self.self = true;
+            self.inLevel = mp.levelId() != 0xFF;
+            self.where = self.inLevel ? cb2roster::levelName(int(mp.levelId())) : "MENU";
+            if (self.inLevel) self.time = cb2roster::formatTime(mp.levelSeconds());
+            rows.push_back(self);
+            for (const cb2roster::Member& m : roster.list()) {
+                cb2hud::Row r;
+                r.name = m.name;
+                r.rgb = cb2roster::playerRgb(m.id);
+                r.inLevel = m.level != 0xFF;
+                r.where = r.inLevel ? cb2roster::levelName(m.level) : "MENU";
+                if (r.inLevel) r.time = cb2roster::formatTime(roster.levelTime(m, glfwGetTime()));
+                else if (m.lastLevel != 0xFF) r.time = "LAST " + cb2roster::formatTime(m.lastTime);
+                rows.push_back(r);
+            }
+            hud.draw(menu.surface(), rows, settings.roster, glfwGetTime());
+        }
         {
             if (menu.isOpen() && !menuShotPath.empty()) { saveWindow(menuShotPath, fw, fh); std::printf("menu picture saved to %s\n", menuShotPath.c_str()); menuShotPath.clear(); }
         }
@@ -635,6 +709,7 @@ int main(int argc, char** argv) {
         if (edge(GLFW_KEY_F1, f1Down)) { settings.filter = (settings.filter + 1) % 3; saveSettings(); }
         if (edge(GLFW_KEY_F2, f2Down) && useHires) { showHires = !showHires; p.gpu.rasterize = !showHires; }
         if (edge(GLFW_KEY_F11, f11Down)) toggleFullscreen();
+        if (edge(GLFW_KEY_F3, f3Down) && mp.active()) { settings.roster = !settings.roster; saveSettings(); }
         if (!menu.isOpen()) {
             if (edge(GLFW_KEY_F6, f6Down)) { stateSlot = stateSlot % 4 + 1; menu.toast("STATE SLOT " + std::to_string(stateSlot), glfwGetTime()); }
             if (edge(GLFW_KEY_F5, f5Down)) {

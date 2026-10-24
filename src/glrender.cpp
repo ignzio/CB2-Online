@@ -23,7 +23,7 @@ void main() {
 }
 )";
 
-// a = (page x, page y, depth, flags: 1 textured, 2 raw, 4 opaque texels only, 8 semi-transparent texels only)
+// a = (page x, page y, depth, flags: 1 textured, 2 raw, 4 opaque texels only, 8 semi-transparent texels only, bits 16..23 opacity 1..254 (0 = solid))
 // b = (clut x, clut y, window mask x | y << 8, window offset x | y << 8)
 const char* kMainFrag = R"(#version 330 core
 in vec2 vUv; in vec3 vCol; flat in ivec4 vA; flat in ivec4 vB;
@@ -57,7 +57,8 @@ void main() {
         if ((vA.w & 2) == 0) tc = min(tc * vCol * 2.0, vec3(1.0));
         c = tc;
     }
-    o = vec4(c, 1.0);
+    int ab = (vA.w >> 16) & 255;
+    o = vec4(c, ab == 0 ? 1.0 : float(ab) / 255.0);
 }
 )";
 
@@ -165,6 +166,7 @@ void HiResRenderer::apply(const State& s) {
     case 0: glBlendColor(0.5f, 0.5f, 0.5f, 0.5f); glBlendFunc(GL_CONSTANT_COLOR, GL_CONSTANT_COLOR); break;  // (B + F) / 2
     case 1: glBlendFunc(GL_ONE, GL_ONE); break;                                                              // B + F
     case 2: glBlendFunc(GL_ONE, GL_ONE); break;                                                              // B - F
+    case 5: glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE); break;               // see-through (other players)
     default: glBlendColor(0.25f, 0.25f, 0.25f, 0.25f); glBlendFunc(GL_CONSTANT_COLOR, GL_ONE); break;     // B + F / 4
     }
 }
@@ -189,7 +191,7 @@ void HiResRenderer::pushTri(const GpuCmd& c, int passFlag) {
         v.x = c.x[i]; v.y = c.y[i]; v.u = c.u[i]; v.v = c.v[i];
         v.r = c.col[i][0] / 255.0f; v.g = c.col[i][1] / 255.0f; v.b = c.col[i][2] / 255.0f;
         v.a[0] = c.tpx; v.a[1] = c.tpy; v.a[2] = c.depth;
-        v.a[3] = (c.textured ? 1 : 0) | (c.raw ? 2 : 0) | passFlag;
+        v.a[3] = (c.textured ? 1 : 0) | (c.raw ? 2 : 0) | passFlag | (c.alpha < 255 ? int(c.alpha ? c.alpha : 1) << 16 : 0);
         v.b2[0] = c.clutX; v.b2[1] = c.clutY;
         v.b2[2] = c.twMX | (c.twMY << 8);
         v.b2[3] = c.twOX | (c.twOY << 8);
@@ -291,7 +293,7 @@ void HiResRenderer::render(Gpu& gpu) {
                 want(-1, c.area); pushTri(c, 4);
                 want(c.semiMode, c.area); pushTri(c, 8);
             } else {
-                want(c.semi ? c.semiMode : -1, c.area);
+                want(c.semi ? c.semiMode : (c.alpha < 255 ? 5 : -1), c.area);
                 pushTri(c, 0);
             }
             break;

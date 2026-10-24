@@ -2,6 +2,7 @@
 // PlayStation GPU: GP0/GP1 command interpreter with a software rasteriser writing into a 1024x512 VRAM.
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -20,6 +21,7 @@ struct GpuCmd {
     bool textured = false, raw = false, semi = false;
     uint8_t semiMode = 0, depth = 0, tpx = 0, tpy = 0, twMX = 0, twMY = 0, twOX = 0, twOY = 0;
     uint16_t clutX = 0, clutY = 0;
+    uint8_t alpha = 255;                   // Tri: opacity the host renderer gives it (other players' Crashes, see markAlpha); 255 = the game's own look
     int16_t area[4] = {};                  // draw area x0 y0 x1 y1 (inclusive)
     // Fill / Upload: VRAM rectangle. Upload carries the final pixels (offset into Gpu::cmdPool).
     int16_t rx = 0, ry = 0, rw = 0, rh = 0;
@@ -50,7 +52,15 @@ public:
     // lies over everything the game drew, whatever the order of its display lists).
     void queueTag(TextTag t) { t.offX = offX; t.offY = offY; pendingTags.push_back(std::move(t)); }
     std::vector<std::string> textPool;
+    // Other players' Crashes can be drawn see-through: the vertices (screen positions before the draw offset, as the GTE projected them) that belong to
+    // them are marked with markAlpha during the frame, and every recorded triangle whose three vertices are all marked gets `alphaValue`. The marks are
+    // dropped by flushTags at the end of the frame.
+    uint8_t alphaValue = 255;
+    void markAlpha(float sx, float sy) { alphaKeys.insert(alphaKey(sx + float(offX), sy + float(offY))); }
+    static uint64_t alphaKey(float x, float y) { return (uint64_t(uint32_t(int32_t(x * 8.0f + 0.5f + 65536.0f))) << 32) | uint32_t(int32_t(y * 8.0f + 0.5f + 65536.0f)); }
+    std::unordered_set<uint64_t> alphaKeys;
     void flushTags() {
+        alphaKeys.clear();
         if (pendingTags.empty()) return;
         if (recording) {
             for (const TextTag& t : pendingTags) {

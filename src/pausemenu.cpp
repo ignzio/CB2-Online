@@ -3,7 +3,9 @@
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace cb2menu {
 
@@ -12,6 +14,23 @@ using namespace cb2ui;
 namespace {
 
 const char* filterName(int f) { return f == 0 ? "NEAREST" : f == 1 ? "SMOOTH" : "SHARP"; }
+
+constexpr int kBindings = cb2input::kBindingCount;
+constexpr int kResetRow = kBindings, kBackRow = kBindings + 1, kControlRows = kBindings + 2;
+
+// Controls page geometry
+constexpr float kRowY = 90, kRowStep = 22, kRowH = 20, kLabelX = 40, kKeyX = 290, kKeyW = 150, kPadX = 450, kPadW = 150;
+
+// A slim row for the Controls list: dark frame, wooden face, the selection lights it up.
+void slim(Canvas& c, float x, float y, float w, float h, bool on) {
+    c.rect(x - 1, y - 1, w + 2, h + 2, rgb(20, 10, 4));
+    c.rect(x, y, w, h, on ? rgb(214, 134, 40) : rgb(120, 74, 30), on ? rgb(150, 82, 20) : rgb(74, 42, 16));
+    c.rect(x, y, w, 2, rgb(255, 230, 150), on ? 0.5f : 0.15f);
+}
+
+void pointer(Canvas& c, float x, float y, float h) {
+    c.triangle(x - 15, y + h * 0.5f - 8, x - 15, y + h * 0.5f + 8, x - 3, y + h * 0.5f, rgb(255, 198, 40));
+}
 
 }  // namespace
 
@@ -23,16 +42,32 @@ bool PauseMenu::init(Settings* settings, const Context& context) {
 
 void PauseMenu::open() {
     page = Page::Main;
-    sel = 0;
+    sel = mainSel = 0;
+    message.clear();
+    dragging = -1;
+}
+
+void PauseMenu::setPage(Page p) {
+    if (page == Page::Main && p != Page::Main) mainSel = sel;
+    page = p;
+    if (p == Page::Main) sel = mainSel; else sel = 0;
     message.clear();
 }
 
 std::vector<PauseMenu::Item> PauseMenu::items() const {
-    std::vector<Item> v = {kResume, kControls, kVolume, kFilter, kFullscreen};
-    if (ctx.online) v.push_back(kTags);
-    v.push_back(kMainMenu);
-    v.push_back(kQuit);
-    return v;
+    switch (page) {
+    case Page::Main: {
+        std::vector<Item> v = {kResume, kSound};
+        if (ctx.online) v.push_back(kOnline);
+        v.push_back(kControls);
+        v.push_back(kMainMenu);
+        v.push_back(kQuit);
+        return v;
+    }
+    case Page::Sound: return {kVolume, kFilter, kFullscreen, kBack};
+    case Page::Online: return {kTags, kOpacity, kRoster, kBack};
+    default: return {};
+    }
 }
 
 void PauseMenu::adjust(Item item, int d) {
@@ -42,28 +77,38 @@ void PauseMenu::adjust(Item item, int d) {
         if (v != s->volume) { s->volume = v; changed = true; }
         break;
     }
-    case kFilter:
-        s->filter = (s->filter + 3 + d) % 3;
-        changed = true;
+    case kOpacity: {
+        const int v = std::max(10, std::min(100, s->opacity + 5 * d));
+        if (v != s->opacity) { s->opacity = v; changed = true; }
         break;
-    case kFullscreen:
-        if (ctx.toggleFullscreen) ctx.toggleFullscreen();
-        break;
-    case kTags:
-        s->nameTags = !s->nameTags;
-        changed = true;
-        break;
+    }
+    case kFilter: s->filter = (s->filter + 3 + d) % 3; changed = true; break;
+    case kFullscreen: if (ctx.toggleFullscreen) ctx.toggleFullscreen(); break;
+    case kTags: s->nameTags = !s->nameTags; changed = true; break;
+    case kRoster: s->roster = !s->roster; changed = true; break;
     default: break;
     }
+}
+
+void PauseMenu::setSlider(Item item, float x) {
+    const float f = std::max(0.0f, std::min(1.0f, (x - barX) / std::max(1.0f, barW)));
+    int v;
+    if (item == kVolume) v = int(std::lround(f * 20.0f)) * 5;                 // 0..100 in steps of 5
+    else v = 10 + int(std::lround(f * 18.0f)) * 5;                            // 10..100 in steps of 5
+    int& target = item == kVolume ? s->volume : s->opacity;
+    if (v != target) { target = v; changed = true; }
 }
 
 void PauseMenu::activate(Item item) {
     switch (item) {
     case kResume: close(); break;
-    case kControls: page = Page::Controls; controlsSel = 0; message.clear(); break;
-    case kFilter: case kFullscreen: case kTags: adjust(item, 1); break;
-    case kMainMenu: page = Page::ConfirmMenu; confirmSel = 1; break;
-    case kQuit: page = Page::ConfirmQuit; confirmSel = 1; break;
+    case kSound: setPage(Page::Sound); break;
+    case kOnline: setPage(Page::Online); break;
+    case kControls: setPage(Page::Controls); controlsSel = 0; column = 0; break;
+    case kMainMenu: mainSel = sel; page = Page::ConfirmMenu; confirmSel = 1; break;
+    case kQuit: mainSel = sel; page = Page::ConfirmQuit; confirmSel = 1; break;
+    case kBack: setPage(Page::Main); break;
+    case kFilter: case kFullscreen: case kTags: case kRoster: adjust(item, 1); break;
     default: break;
     }
 }
@@ -79,7 +124,12 @@ void PauseMenu::key(int k, int action) {
     if (page == Page::Capture) {
         if (!press) return;
         if (esc) { page = Page::Controls; return; }
-        if (k == GLFW_KEY_DELETE || k == GLFW_KEY_BACKSPACE) { s->keys.key[controlsSel] = 0; changed = true; page = Page::Controls; return; }
+        const bool clear = k == GLFW_KEY_DELETE || k == GLFW_KEY_BACKSPACE;
+        if (column == 1) {   // waiting for a game pad button: the keyboard can only clear or cancel
+            if (clear) { s->keys.pad[controlsSel] = cb2input::kPadNone; changed = true; page = Page::Controls; }
+            return;
+        }
+        if (clear) { s->keys.key[controlsSel] = 0; changed = true; page = Page::Controls; return; }
         if (cb2input::reservedKey(k)) { message = "THAT KEY IS RESERVED"; messageUntil = now + 2.5; return; }
         s->keys.assign(controlsSel, k);
         changed = true;
@@ -97,23 +147,94 @@ void PauseMenu::key(int k, int action) {
         return;
     }
     if (page == Page::Controls) {
-        const int rows = cb2input::kBindingCount + 2;   // bindings, reset, back
-        if (up) move(controlsSel, rows, up);
-        else if (esc) { page = Page::Main; message.clear(); }
+        if (up) move(controlsSel, kControlRows, up);
+        else if (side) {
+            if (controlsSel < kBindings) column = side < 0 ? 0 : 1;
+            else controlsSel = side < 0 ? kResetRow : kBackRow;
+        } else if (esc) setPage(Page::Main);
         else if (enter) {
-            if (controlsSel < cb2input::kBindingCount) { page = Page::Capture; message.clear(); }
-            else if (controlsSel == cb2input::kBindingCount) { s->keys.reset(); changed = true; }
-            else { page = Page::Main; message.clear(); }
+            if (controlsSel < kBindings) startCapture(controlsSel, column);
+            else if (controlsSel == kResetRow) { s->keys.reset(); changed = true; message = "DEFAULTS RESTORED"; messageUntil = now + 2.0; }
+            else setPage(Page::Main);
+        } else if (k == GLFW_KEY_DELETE && press && controlsSel < kBindings) {
+            if (column == 0) s->keys.key[controlsSel] = 0; else s->keys.pad[controlsSel] = cb2input::kPadNone;
+            changed = true;
         }
         return;
     }
-    // main page
+    // list pages
     const auto list = items();
     sel = std::min(sel, int(list.size()) - 1);
     if (up) move(sel, int(list.size()), up);
     else if (side) adjust(list[size_t(sel)], side);
-    else if (esc) close();
+    else if (esc) { if (page == Page::Main) close(); else setPage(Page::Main); }
     else if (enter) activate(list[size_t(sel)]);
+}
+
+void PauseMenu::padButton(int code) {
+    if (!capturingPad()) return;
+    s->keys.assignPad(controlsSel, code);
+    changed = true;
+    message.clear();
+    page = Page::Controls;
+}
+
+int PauseMenu::hitAt(float x, float y) const {
+    for (size_t i = 0; i < hits.size(); ++i)
+        if (x >= hits[i].x && x < hits[i].x + hits[i].w && y >= hits[i].y && y < hits[i].y + hits[i].h) return int(i);
+    return -1;
+}
+
+void PauseMenu::wheel(float notches) {
+    if (page == Page::Closed || notches == 0) return;
+    const int d = notches > 0 ? -1 : 1;
+    if (page == Page::Controls) move(controlsSel, kControlRows, d);
+    else if (page == Page::ConfirmMenu || page == Page::ConfirmQuit) confirmSel = 1 - confirmSel;
+    else if (page != Page::Capture) { const int n = int(items().size()); if (n) move(sel, n, d); }
+}
+
+void PauseMenu::mouse(float x, float y, bool down) {
+    if (page == Page::Closed) { mouseDown = down; return; }
+    mx = x; my = y;
+    const bool moved = std::fabs(x - lastMx) > 0.5f || std::fabs(y - lastMy) > 0.5f;
+    lastMx = x; lastMy = y;
+    const bool pressed = down && !mouseDown;
+    mouseDown = down;
+    if (!down) dragging = -1;
+    if (dragging >= 0) {
+        const auto list = items();
+        if (dragging < int(list.size())) setSlider(list[size_t(dragging)], x);
+        return;
+    }
+    const int h = hitAt(x, y);
+    if (h < 0) return;
+    const int index = hits[size_t(h)].index;
+    if (page == Page::Capture) return;
+    if (page == Page::ConfirmMenu || page == Page::ConfirmQuit) {
+        if (moved) confirmSel = index;
+        if (pressed) { confirmSel = index; key(GLFW_KEY_ENTER, GLFW_PRESS); }
+        return;
+    }
+    if (page == Page::Controls) {
+        // index: row * 4 + part, part 0 label, 1 keyboard cell, 2 game pad cell
+        const int row = index / 4, part = index % 4;
+        if (moved) { controlsSel = row; if (part == 1) column = 0; else if (part == 2) column = 1; }
+        if (pressed) {
+            controlsSel = row;
+            if (row < kBindings) { if (part == 1 || part == 2) startCapture(row, part == 2 ? 1 : 0); }
+            else key(GLFW_KEY_ENTER, GLFW_PRESS);
+        }
+        return;
+    }
+    const auto list = items();
+    if (index >= int(list.size())) return;
+    if (moved) sel = index;
+    if (pressed) {
+        sel = index;
+        const Item item = list[size_t(index)];
+        if (isSlider(item) && x >= barX - 8 && x <= barX + barW + 8) { dragging = index; setSlider(item, x); }
+        else activate(item);
+    }
 }
 
 bool PauseMenu::script(const std::string& tok) {
@@ -122,6 +243,19 @@ bool PauseMenu::script(const std::string& tok) {
                               {"enter", GLFW_KEY_ENTER}, {"esc", GLFW_KEY_ESCAPE}, {"del", GLFW_KEY_DELETE}};
     for (const Map& m : map) if (tok == m.name) { key(m.key, GLFW_PRESS); return true; }
     if (tok.rfind("key:", 0) == 0) { const int k = cb2input::keyFromName(tok.substr(4)); if (k) { key(k, GLFW_PRESS); return true; } }
+    if (tok.rfind("pad:", 0) == 0) { const int c = cb2input::padFromName(tok.substr(4)); if (c != cb2input::kPadNone) { padButton(c); return true; } }
+    if (tok == "release") { scriptDown = false; mouse(mx, my, false); return true; }
+    if (tok.rfind("move:", 0) == 0 || tok.rfind("click:", 0) == 0 || tok.rfind("drag:", 0) == 0) {
+        const size_t colon = tok.find(':');
+        const float x = float(std::atof(tok.c_str() + colon + 1));
+        const size_t comma = tok.find('/');
+        const float y = comma == std::string::npos ? 0.0f : float(std::atof(tok.c_str() + comma + 1));
+        const bool isClick = tok[0] == 'c', isDrag = tok[0] == 'd';
+        if (isClick) { scriptDown = false; mouse(x, y, false); mouse(x, y, true); mouse(x, y, false); }
+        else if (isDrag) { scriptDown = true; mouse(x, y, false); mouse(x, y, true); }   // the button stays down for the following move tokens
+        else mouse(x, y, scriptDown);
+        return true;
+    }
     return false;
 }
 
@@ -135,81 +269,114 @@ void PauseMenu::draw(double t) {
         return;
     }
     now = t;
+    hits.clear();
     if (!message.empty() && now > messageUntil) message.clear();
     const bool blink = int(t * 2.0) % 2 == 0;
-    canvas.rect(0, 0, kW, kH, rgb(0, 6, 12), 0.62f);
+    canvas.rect(0, 0, kW, kH, rgb(0, 6, 12), 0.66f);
     canvas.rect(0, 22, kW, 4, rgb(150, 92, 38), 0.9f);
     canvas.rect(0, kH - 26, kW, 4, rgb(150, 92, 38), 0.9f);
-    canvas.centred(page == Page::Controls || page == Page::Capture ? "CONTROLS" : "PAUSED", 38, 54, kGold1, kGold2);
 
-    auto row = [&](float y, bool selected, const std::string& label, const std::string& value, Rgb valueColour) {
+    auto centredRow = [&](int index, float y, bool selected, const std::string& label) {
+        plank(canvas, 130, y, 380, 36, selected);
+        canvas.text(label, 320 - canvas.width(label, 24) * 0.5f, y + 4, 24, selected ? kGold1 : kWhite1, selected ? kGold2 : kWhite2);
+        hits.push_back({127, y - 3, 386, 42, index});
+    };
+    auto valueRow = [&](int index, float y, bool selected, const std::string& label, const std::string& value, Rgb valueColour) {
         plank(canvas, 130, y, 380, 36, selected);
         canvas.text(label, 146, y + 5, 22, selected ? kGold1 : kWhite1, selected ? kGold2 : kWhite2);
         if (!value.empty()) canvas.text(value, 496 - canvas.width(value, 20), y + 7, 20, selected ? rgb(255, 246, 210) : valueColour);
-    };
-    auto centredRow = [&](float y, bool selected, const std::string& label) {
-        plank(canvas, 130, y, 380, 36, selected);
-        canvas.text(label, 320 - canvas.width(label, 24) * 0.5f, y + 4, 24, selected ? kGold1 : kWhite1, selected ? kGold2 : kWhite2);
+        hits.push_back({127, y - 3, 386, 42, index});
     };
 
     std::string hint;
-    if (page == Page::Main) {
+    const bool listPage = page == Page::Main || page == Page::Sound || page == Page::Online;
+    if (listPage) {
+        const char* heading = page == Page::Main ? "PAUSED" : page == Page::Sound ? "SOUND AND PICTURE" : "ONLINE";
+        canvas.centred(heading, 38, page == Page::Main ? 54 : 44, kGold1, kGold2);
         const auto list = items();
         sel = std::min(sel, int(list.size()) - 1);
+        barX = 262; barW = 144;
         float y = 112;
-        for (size_t i = 0; i < list.size(); ++i, y += 40) {
+        for (size_t i = 0; i < list.size(); ++i, y += 44) {
             const bool on = int(i) == sel;
+            const int idx = int(i);
             switch (list[i]) {
-            case kResume: centredRow(y, on, "RESUME"); break;
-            case kControls: centredRow(y, on, "CONTROLS"); break;
-            case kVolume: {
-                row(y, on, "VOLUME", std::to_string(s->volume), kTeal);
-                // the level as a bar between the label and the number
-                canvas.rect(262, y + 12, 144, 12, rgb(0, 0, 0), 0.6f);
-                canvas.rect(263, y + 13, 142.0f * float(s->volume) / 100.0f, 10, on ? rgb(255, 232, 110) : rgb(128, 232, 255), on ? rgb(255, 140, 24) : rgb(60, 160, 200));
+            case kResume: centredRow(idx, y, on, "RESUME"); break;
+            case kSound: centredRow(idx, y, on, "SOUND AND PICTURE"); break;
+            case kOnline: centredRow(idx, y, on, "ONLINE"); break;
+            case kControls: centredRow(idx, y, on, "CONTROLS"); break;
+            case kMainMenu: centredRow(idx, y, on, "MAIN MENU"); break;
+            case kQuit: centredRow(idx, y, on, "QUIT GAME"); break;
+            case kBack: centredRow(idx, y, on, "BACK"); break;
+            case kVolume:
+            case kOpacity: {
+                const bool vol = list[i] == kVolume;
+                const int v = vol ? s->volume : s->opacity;
+                valueRow(idx, y, on, vol ? "VOLUME" : "OPACITY", std::to_string(v) + (vol ? "" : "%"), kTeal);
+                const float f = vol ? float(v) / 100.0f : float(v - 10) / 90.0f;
+                canvas.rect(barX, y + 12, barW, 12, rgb(0, 0, 0), 0.6f);
+                canvas.rect(barX + 1, y + 13, (barW - 2) * f, 10, on ? rgb(255, 232, 110) : rgb(128, 232, 255), on ? rgb(255, 140, 24) : rgb(60, 160, 200));
+                const float kx = barX + (barW - 4) * f;   // the handle
+                canvas.rect(kx, y + 9, 5, 18, rgb(255, 246, 210), 0.95f);
                 break;
             }
-            case kFilter: row(y, on, "PICTURE", filterName(s->filter), kTeal); break;
-            case kFullscreen: row(y, on, "FULLSCREEN", ctx.isFullscreen && ctx.isFullscreen() ? "ON" : "OFF", kTeal); break;
-            case kTags: row(y, on, "NAME TAGS", s->nameTags ? "ON" : "OFF", kTeal); break;
-            case kMainMenu: centredRow(y, on, "MAIN MENU"); break;
-            case kQuit: centredRow(y, on, "QUIT GAME"); break;
+            case kFilter: valueRow(idx, y, on, "PICTURE", filterName(s->filter), kTeal); break;
+            case kFullscreen: valueRow(idx, y, on, "FULLSCREEN", ctx.isFullscreen && ctx.isFullscreen() ? "ON" : "OFF", kTeal); break;
+            case kTags: valueRow(idx, y, on, "NAME TAGS", s->nameTags ? "ON" : "OFF", kTeal); break;
+            case kRoster: valueRow(idx, y, on, "PLAYER LIST", s->roster ? "ON" : "OFF", kTeal); break;
             }
         }
-        if (ctx.online) canvas.centred("ONLINE: THE OTHERS SEE YOU STAND STILL WHILE THIS IS OPEN", 432, 15, kDim);
-        hint = "UP DOWN  SELECT      LEFT RIGHT  CHANGE      ENTER  CHOOSE      ESC  RESUME";
+        if (page == Page::Online) {
+            canvas.centred(sel == 1 ? "HOW SOLID THE OTHER PLAYERS' CRASHES ARE" : "F3 SHOWS OR HIDES THE PLAYER LIST IN THE GAME", 392, 15, kDim);
+        }
+        if (page == Page::Main && ctx.online) canvas.centred("ONLINE: THE OTHERS SEE YOU STAND STILL WHILE THIS IS OPEN", 432, 15, kDim);
+        hint = "UP DOWN  SELECT      LEFT RIGHT  CHANGE      ENTER  CHOOSE      ESC  BACK";
     } else if (page == Page::Controls || page == Page::Capture) {
-        const int total = cb2input::kBindingCount + 2;
-        const int visible = 8;
-        const int top = std::max(0, std::min(controlsSel - visible / 2, total - visible));
-        float y = 100;
-        for (int i = top; i < std::min(total, top + visible); ++i, y += 40) {
-            const bool on = i == controlsSel;
-            if (i < cb2input::kBindingCount) {
-                const bool waiting = page == Page::Capture && on;
-                const std::string value = waiting ? (blink ? "PRESS A KEY" : "") : cb2input::keyName(s->keys.key[i]);
-                row(y, on, cb2input::kBindings[i].label, value, s->keys.key[i] == 0 ? kDim : kWhite1);
-                if (waiting) canvas.text(value, 496 - canvas.width("PRESS A KEY", 20), y + 7, 20, kGreen);
-            } else if (i == cb2input::kBindingCount) {
-                centredRow(y, on, "RESET TO DEFAULTS");
-            } else {
-                centredRow(y, on, "BACK");
+        canvas.centred("CONTROLS", 20, 46, kGold1, kGold2);
+        const bool capturing = page == Page::Capture;
+        canvas.text("KEYBOARD", kKeyX + (kKeyW - canvas.width("KEYBOARD", 14)) * 0.5f, 70, 14, column == 0 ? kGold1 : kDim);
+        canvas.text("GAME PAD", kPadX + (kPadW - canvas.width("GAME PAD", 14)) * 0.5f, 70, 14, column == 1 ? kGold1 : kDim);
+        for (int i = 0; i < kBindings; ++i) {
+            const float y = kRowY + float(i) * kRowStep;
+            const bool rowOn = i == controlsSel;
+            if (rowOn) pointer(canvas, 24, y, kRowH);
+            canvas.text(cb2input::kBindings[i].label, kLabelX, y + 2, 15, rowOn ? kGold1 : kWhite1, rowOn ? kGold2 : kWhite2);
+            for (int col = 0; col < 2; ++col) {
+                const float cx = col == 0 ? kKeyX : kPadX, cw = col == 0 ? kKeyW : kPadW;
+                const bool cellOn = rowOn && column == col;
+                slim(canvas, cx, y, cw, kRowH, cellOn);
+                const bool waiting = capturing && cellOn;
+                const bool none = col == 0 ? s->keys.key[i] == 0 : s->keys.pad[i] == cb2input::kPadNone;
+                std::string value = waiting ? (blink ? (col == 0 ? "PRESS A KEY" : "PRESS A BUTTON") : "") : col == 0 ? cb2input::keyName(s->keys.key[i]) : cb2input::padName(s->keys.pad[i]);
+                const Rgb c = waiting ? kGreen : cellOn ? rgb(255, 246, 210) : none ? kDim : kWhite1;
+                canvas.text(value, cx + (cw - canvas.width(value, 14)) * 0.5f, y + 3, 14, c);
             }
+            hits.push_back({kLabelX, y, kKeyX - kLabelX, kRowH, i * 4});
+            hits.push_back({kKeyX, y, kKeyW, kRowH, i * 4 + 1});
+            hits.push_back({kPadX, y, kPadW, kRowH, i * 4 + 2});
         }
-        if (top > 0) canvas.triangle(320, 92, 308, 104, 332, 104, kGold1);
-        if (top + visible < total) canvas.triangle(320, y + 4, 308, y - 8, 332, y - 8, kGold1);
-        if (!message.empty()) canvas.centred(message, 416, 20, kRed);
-        else canvas.centred("A GAME PAD WORKS ALONGSIDE THE KEYBOARD", 424, 15, kDim);
-        hint = page == Page::Capture ? "PRESS THE NEW KEY      DELETE  NO KEY      ESC  CANCEL" : "UP DOWN  SELECT      ENTER  REBIND      ESC  BACK";
+        const float by = kRowY + float(kBindings) * kRowStep + 6;
+        for (int b = 0; b < 2; ++b) {
+            const float bx = b == 0 ? 160.0f : 340.0f;
+            const bool on = controlsSel == (b == 0 ? kResetRow : kBackRow);
+            slim(canvas, bx, by, 140, 24, on);
+            const std::string label = b == 0 ? "RESET" : "BACK";
+            canvas.text(label, bx + (140 - canvas.width(label, 16)) * 0.5f, by + 3, 16, on ? kGold1 : kWhite1, on ? kGold2 : kWhite2);
+            hits.push_back({bx, by, 140, 24, (b == 0 ? kResetRow : kBackRow) * 4});
+        }
+        if (!message.empty()) canvas.centred(message, by + 30, 15, kRed);
+        hint = capturing ? (column == 0 ? "PRESS THE NEW KEY      DEL  NO KEY      ESC  CANCEL" : "PRESS A GAME PAD BUTTON      DEL  NO BUTTON      ESC  CANCEL")
+                         : "ARROWS  PICK      ENTER  REBIND      DEL  CLEAR      ESC  BACK";
     } else {
+        canvas.centred("PAUSED", 38, 54, kGold1, kGold2);
         const bool toMenu = page == Page::ConfirmMenu;
         canvas.centred(toMenu ? "BACK TO THE MAIN MENU?" : "QUIT THE GAME?", 130, 30, kGold1, kGold2);
         canvas.centred("PROGRESS YOU HAVE NOT SAVED ON THE MEMORY CARD IS LOST", 176, 16, kRed);
-        centredRow(230, confirmSel == 0, "YES");
-        centredRow(276, confirmSel == 1, "NO");
+        centredRow(0, 230, confirmSel == 0, "YES");
+        centredRow(1, 276, confirmSel == 1, "NO");
         hint = "UP DOWN  SELECT      ENTER  CHOOSE      ESC  BACK";
     }
-    canvas.centred(hint, 446, 16, kDim);
+    canvas.centred(hint, 446, 14, kDim);
     canvas.flush();
 }
 

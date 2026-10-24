@@ -1,5 +1,7 @@
 #include "multiplayer.hpp"
 
+#include "roster.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -20,11 +22,6 @@ constexpr uint32_t kTransBlock = 0x40 + 4 * 34, kEventBlock = 0x40 + 4 * 35, kHe
 constexpr uint32_t kRamLow = 0x80010000, kRamHigh = 0x80200000;
 constexpr int kMarkerField = 63;          // an unused field of the extra object: holds kMarker so we can tell our objects from reused memory
 constexpr uint32_t kMarker = 0x4D504C59;
-
-uint32_t rgbForPlayer(int index) {   // BGR for the GPU: blue, green, pink, yellow, white
-    static const uint32_t k[] = {0xFFC060, 0x60E060, 0xE070F0, 0x50E8F0, 0xF0F0F0};
-    return k[index % 5];
-}
 
 bool debug() { static const bool d = std::getenv("CB2_MPDEBUG") != nullptr; return d; }
 
@@ -95,6 +92,7 @@ void Multiplayer::install() {
 
 void Multiplayer::stateLoaded(uint32_t levelNow) {
     level = levelNow & 0xFF;
+    levelStartFrame = p.frames;
     player = playerSeen = 0;
     playerSteps = lastPlayerStep = 0;
     managedFrame = ~0ull;
@@ -171,6 +169,7 @@ uint32_t Multiplayer::findPlayer() {
 void Multiplayer::onLevel(uint32_t id) {
     if (debug()) std::printf("[mp] frame %llu: level %02X opened\n", (unsigned long long)p.frames, id & 0xFF);
     level = id & 0xFF;
+    levelStartFrame = p.frames;
     announce(level);   // until the new level's Crash exists others must not keep drawing the old one
     player = 0;
     playerSteps = 0;
@@ -242,7 +241,7 @@ void Multiplayer::onStepReturn() {
 void Multiplayer::buildTags() {
     if (puppets.empty() || samples.empty()) { samples.clear(); return; }
     using Mat = std::array<double, 9>;   // row-major, in the GTE's 1.3.12 fixed point units (4096 = 1.0)
-    struct Group { Mat rt; size_t count = 0; float top = 1e9f, centre = 0, middle = 0; };
+    struct Group { Mat rt; size_t count = 0; float top = 1e9f, centre = 0, middle = 0; size_t begin = 0, end = 0; };
     std::vector<Group> groups;
     // consecutive vertices projected with the same transform belong together (one model part, or the level)
     size_t start = 0;
@@ -256,6 +255,8 @@ void Multiplayer::buildTags() {
                     double(int16_t(s.rt[1] >> 16)), double(int16_t(s.rt[2])), double(int16_t(s.rt[2] >> 16)),
                     double(int16_t(s.rt[3])), double(int16_t(s.rt[3] >> 16)), double(int16_t(s.rt[4]))};
             g.count = n - start;
+            g.begin = start;
+            g.end = n;
             std::vector<float> xs, ys;
             for (size_t q = start; q < n; ++q) {
                 const auto& v = samples[q];
@@ -287,6 +288,8 @@ void Multiplayer::buildTags() {
                (c[3] * c[7] - c[4] * c[6]) / det, (c[1] * c[6] - c[0] * c[7]) / det, (c[0] * c[4] - c[1] * c[3]) / det};
     for (double& v : inv) v *= 4096.0;   // so that inverse * matrix stays in the same units as the matrix
 
+    const bool seeThrough = opacity < 100;
+    p.gpu.alphaValue = seeThrough ? uint8_t(std::max(10, opacity) * 255 / 100) : uint8_t(255);
     int index = 0;
     for (auto& [id, pu] : puppets) {
         ++index;
@@ -308,6 +311,9 @@ void Multiplayer::buildTags() {
                 err = std::max(err, std::abs(std::sqrt(len) - pu.column[col]) / std::max(1.0, pu.column[col]));
             }
             if (err < bestErr) { bestErr = err; best = &g; }
+            // every part with this puppet's matrix signature is the puppet: mark its vertices so the renderer can draw them see-through
+            if (seeThrough && err < 0.0012)
+                for (size_t q = g.begin; q < g.end; ++q) p.gpu.markAlpha(samples[q].sx, samples[q].sy);
         }
         static unsigned calls = 0;
         if (debug() && (++calls % 120) == 0) std::printf("[mp] frame %llu: \"%s\" %s\n", (unsigned long long)p.frames, pu.name.c_str(), best ? "is on screen" : "is not on screen");
@@ -317,7 +323,10 @@ void Multiplayer::buildTags() {
         tag.text = pu.name;
         tag.x = best->centre;
         tag.y = std::max(best->top - 3.0f, 14.0f);
-        tag.rgb = rgbForPlayer(index - 1);
+        {
+            const uint32_t c = cb2roster::playerRgb(id);   // 0xRRGGBB -> the GPU's BGR
+            tag.rgb = ((c & 0xFF) << 16) | (c & 0xFF00) | (c >> 16);
+        }
         if (showTags) p.gpu.queueTag(tag);
     }
     samples.clear();

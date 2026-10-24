@@ -1,13 +1,13 @@
 # Two game instances on this machine in the same room, each with a scripted pad (skip the cutscenes, walk into the Turtle Woods portal);
 # each saves what its window shows. Nobody types an address: without -Server they find each other on this PC by themselves; with
 # -Server host:port they are introduced by a rendezvous server (cb2_server) and LAN probing is switched off.
-# Usage: powershell -File tools\mp_test.ps1 [-Scale 2] [-Server 127.0.0.1:7790]
-param([int]$Scale = 2, [string]$Server = "")
+# Usage: powershell -File tools\mp_test.ps1 [-Scale 2] [-Server 127.0.0.1:7790] [-Game dist\Crash2\data]
+param([int]$Scale = 2, [string]$Server = "", [string]$Game = "")
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $exe = "$root\build\Release\cb2_play.exe"
-$game = (Resolve-Path "..").Path
+$game = if ($Game) { (Resolve-Path $Game).Path } else { (Resolve-Path "..").Path }   # the folder with SCUS_941.54 and S0..S3
 function Launch($name, $extra, $shot) {
     $argList = @("`"$game`"", '--hidden', '--scale', "$Scale", '--autostart', '--pace-from', '4300', '--press', '4000-4004:start', '--press', '5500-5504:start', '--window-capture', '--capture-after-puppet', '150',
                  '--capture', "9000:$shot", '--name', $name) + $extra

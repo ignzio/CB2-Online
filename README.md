@@ -72,12 +72,19 @@ scripted run and saves one. States are not portable between versions that change
 memory card saves, and they only work with the normal (interpreter) engine. `cb2_statetest` checks that a loaded state replays
 identically.
 
-**In-game menu (`Esc`).** Pauses the game and offers Resume, Controls, Volume, Picture (the `F1` filter), Fullscreen,
-Name tags (online only), Main menu and Quit. *Controls* rebinds all 14 PS1 buttons: pick a row, press Enter, press the new
-key (a key already in use swaps with the one you pick; `Del` clears a binding; `Esc`, `Tab`, `F1`, `F2`, `F11` and `F12`
-are reserved). *Main menu* starts a fresh copy of the game at the lobby, so you can pick another mode or room; unsaved
-progress is lost. A game pad navigates it too (D-pad, A = choose, B = back). Online, the others see you stand still while
-the menu is open. Everything you change is remembered in `cb2.cfg` (`volume`, `filter`, `nametags`, `key_<button>`).
+**In-game menu (`Esc`).** Pauses the game. Pages: *Sound and picture* (volume slider, display filter, fullscreen), *Online* (name tags,
+an **opacity slider** for the other players' Crashes, the player list), *Controls*, *Main menu* (starts a fresh copy at the lobby; unsaved
+progress is lost) and *Quit*. It works with keyboard, game pad and mouse: arrows / D-pad / hover to pick, Enter / A / click to choose,
+Left-Right or dragging to move a slider, Esc / B / right click to go back, mouse wheel to scroll. Online, the others see you stand still
+while the menu is open.
+*Controls* shows the **keyboard and game pad bindings side by side** for all 14 PS1 buttons: pick a row, press Enter (or click a cell),
+then press the new key or game pad button. A key or button already in use swaps with the one you pick; `Del` clears a binding; `Esc`,
+`Tab`, `F1`, `F2`, `F3`, `F5`, `F6`, `F9`, `F11` and `F12` are reserved. The left stick always works as the D-pad. Everything is remembered in
+`cb2.cfg` (`volume`, `filter`, `nametags`, `opacity`, `roster`, `key_<button>`, `pad_<button>`).
+
+**Online overlay.** In an online room, notices appear at the top left when somebody joins or leaves the room or enters or leaves a level
+(with the time they spent in it), and a **player list** at the right edge shows everybody's name, level and how long they have been in it
+(`F3` hides or shows the list; also in the menu).
 
 The picture is drawn by an OpenGL renderer at `--scale N` (default 4) times the original resolution. Projected
 vertices keep their unrounded GTE positions, so geometry does not wobble at high resolution (`CB2_NOPRECISE=1`
