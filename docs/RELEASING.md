@@ -33,7 +33,7 @@ The script creates the tag `v<VERSION>` on `main`, and uploads:
 
 | Asset | Used for |
 | --- | --- |
-| `CB2-Online-v<VERSION>.zip` | first install: the game without data; the player copies their own game files into `data\` |
+| `CB2-Online-v<VERSION>.zip` | first install: the game without data; the game asks for the player's own disc image on first start and fills `data\` |
 | `Crash2.exe` | what the updater downloads; replaces the running executable, whatever it is called |
 | `Crash2-Server.exe` | replaces `Crash2 Server.exe` when the player has one |
 

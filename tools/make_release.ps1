@@ -28,9 +28,9 @@ Copy-Item $player (Join-Path $pack "Crash2.exe")
 Copy-Item $server (Join-Path $pack "Crash2 Server.exe")
 Copy-Item (Join-Path $root "LICENSE") $pack -ErrorAction SilentlyContinue
 Set-Content (Join-Path $pack "FONT-LICENSE.txt") -Encoding ascii -Value "The online menu uses the font Crash-a-Like by Aryel Filipe (https://www.dafont.com/crash-a-like.font), listed on dafont.com as 100% Free."
-Set-Content (Join-Path $pack "data\PUT YOUR GAME FILES HERE.txt") -Encoding ascii -Value @"
-CB2-Online does not include the game. Copy the files of your own copy of Crash Bandicoot 2 (PAL/NTSC-U disc image contents)
-into this folder: SCUS_941.54, SYSTEM.CNF and the S0, S1, S2, S3 folders. Then start Play.bat.
+Set-Content (Join-Path $pack "data\GAME FILES GO HERE.txt") -Encoding ascii -Value @"
+CB2-Online does not include the game. Start Play.bat: the first time, it asks for your own Crash Bandicoot 2 (NTSC-U) disc image
+(.cue/.bin or .iso) and copies the files it needs into this folder. Or copy SCUS_941.54, SYSTEM.CNF and the S0..S3 folders here yourself.
 "@
 Set-Content (Join-Path $pack "cb2.cfg") -Encoding ascii -Value @"
 # CB2-Online settings. Command-line options override these.

@@ -9,11 +9,12 @@ GOOL VM for the decompiler work. Architecture: `docs/PLATFORM.md`, `docs/ARCHITE
 ## Install (from a release)
 
 1. Download `CB2-Online-v<version>.zip` from the [Releases](../../releases) page and unzip it.
-2. **Add your own game files.** The release does not contain the game (it is copyrighted, so it can't be shared here). Copy
-   the contents of your own Crash Bandicoot 2 (NTSC-U, `SCUS_941.54`) disc into the `data` folder: `SCUS_941.54`,
-   `SYSTEM.CNF` and the `S0`, `S1`, `S2`, `S3` folders. If you only have a disc image, open the `.bin`/`.iso` with 7-Zip or
-   a disc tool and extract those files.
-3. Run `Play.bat` (or `Crash2.exe`). The game keeps itself up to date from then on (see Updates below).
+2. Run `Play.bat` (or `Crash2.exe`). The first time, the game asks for **your own disc image** of Crash Bandicoot 2 (NTSC-U,
+   `SCUS_941.54`): pick the `.cue` (or `.bin` / `.iso`) file and it copies the files it needs into the `data` folder, once. The
+   release does not contain the game (it is copyrighted, so it can't be shared here). You can also drop the `.cue`/`.iso`
+   on `Crash2.exe`, or run `Crash2.exe --import "path\to\disc.cue"`. Compressed formats (`.chd`, `.pbp`, `.ecm`) are not supported.
+   If you already have the files extracted, copy `SCUS_941.54`, `SYSTEM.CNF` and `S0`..`S3` into `data` yourself.
+3. The game keeps itself up to date from then on (see Updates below).
 
 ## Build (Windows, Visual Studio 2022 + CMake)
 

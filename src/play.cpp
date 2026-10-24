@@ -26,6 +26,7 @@
 #include "pausemenu.hpp"
 #include "relaunch.hpp"
 #include "updater.hpp"
+#include "discimport.hpp"
 #include "psx.hpp"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -121,7 +122,13 @@ int main(int argc, char** argv) {
                                                        : std::filesystem::path(psx::selfPath()).parent_path().string();
     cfg.load(exeDir);
     int first = 1;
-    if (argc > 1 && std::strncmp(argv[1], "--", 2) != 0) { cfg.game = argv[1]; first = 2; }
+    std::string importImage;                  // a disc image (.cue/.bin/.iso) dropped on the exe or given with --import: its files are copied to <exe folder>\data
+    if (argc > 1 && std::strncmp(argv[1], "--", 2) != 0) {
+        std::error_code isFile;
+        if (cb2import::looksLikeImage(argv[1]) && std::filesystem::is_regular_file(argv[1], isFile)) importImage = argv[1];
+        else cfg.game = argv[1];
+        first = 2;
+    }
     std::vector<std::string> mods = cfg.mods;
     std::string cardPath = cfg.card;
     uint32_t ramMb = uint32_t(cfg.ramMb);
@@ -147,6 +154,7 @@ int main(int argc, char** argv) {
     for (int i = first; i < argc; ++i) {
         const bool more = i + 1 < argc;
         if (!std::strcmp(argv[i], "--game") && more) cfg.game = argv[++i];
+        else if (!std::strcmp(argv[i], "--import") && more) importImage = argv[++i];
         else if (!std::strcmp(argv[i], "--native")) nativeCode = true;
         else if (!std::strcmp(argv[i], "--mod") && more) mods.push_back(argv[++i]);
         else if (!std::strcmp(argv[i], "--card") && more) cardPath = argv[++i];
@@ -216,7 +224,28 @@ int main(int argc, char** argv) {
     if (!bundled) cfg.resolvePaths(exeDir);
     if (cardPath == "memcard0.mcr") cardPath = (std::filesystem::path(exeDir) / "memcard0.mcr").string();   // saves live next to the executable
     if (!bundled) {
-        if (const std::string err = cfg.validate(); !err.empty()) {
+        // First run: the game files are not here. Copy them out of the player's own disc image.
+        std::string err = cfg.validate();
+        const bool wantImport = !importImage.empty() || (!err.empty() && !hidden);
+        if (wantImport) {
+            const std::string dataDir = (std::filesystem::path(exeDir) / "data").string();
+            if (importImage.empty() && cb2import::ask("The game files were not found.\n\nThis program does not include the game. Choose your own Crash Bandicoot 2 (NTSC-U) disc image "
+                                                      "(.cue/.bin or .iso) and the files will be copied for you, once.\n\nPress OK to choose the disc image."))
+                importImage = cb2import::pickImage(exeDir);
+            if (!importImage.empty()) {
+                const cb2import::Result r = cb2import::importDisc(importImage, dataDir);
+                if (r.ok) {
+                    cfg.game = dataDir;
+                    cfg.remember(exeDir, "game", "data");
+                    err = cfg.validate();
+                    if (err.empty() && !hidden) cb2import::inform("Done: " + std::to_string(r.files) + " game files were copied to\n" + dataDir + "\n\nThe game starts now. You do not need the disc image any more.");
+                } else {
+                    psx::showError("The game files could not be imported: " + r.error);
+                    return 2;
+                }
+            }
+        }
+        if (!err.empty()) {
             const std::string usage = err + "\nusage: cb2_play [game folder] [--game <folder>] [--mod <folder>]... [--card file.mcr] [--ram-mb 2..16] [--scale 1..8] [--native]";
             std::fprintf(stderr, "%s\n", usage.c_str());
             psx::showError(usage);
