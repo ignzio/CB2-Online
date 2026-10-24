@@ -30,6 +30,7 @@
 #include "savestate.hpp"
 #include "hud.hpp"
 #include "roster.hpp"
+#include "runtracker.hpp"
 #include "psx.hpp"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -130,6 +131,10 @@ int main(int argc, char** argv) {
     std::string loadStatePath, saveStatePath;   // --load-state file, --save-state-at FRAME:file
     uint64_t saveStateFrame = 0;
     bool relativeFrames = false;
+    struct Poke { uint64_t frame; uint32_t addr, value; bool done = false; };
+    std::vector<Poke> pokes;
+    struct FakeRequest { uint64_t frame; int level; bool done; };
+    std::vector<FakeRequest> fakeRequests;
     std::string importImage;                  // a disc image (.cue/.bin/.iso) dropped on the exe or given with --import: its files are copied to <exe folder>\data
     if (argc > 1 && std::strncmp(argv[1], "--", 2) != 0) {
         std::error_code isFile;
@@ -164,6 +169,16 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--game") && more) cfg.game = argv[++i];
         else if (!std::strcmp(argv[i], "--import") && more) importImage = argv[++i];
         else if (!std::strcmp(argv[i], "--load-state") && more) loadStatePath = argv[++i];
+        else if (!std::strcmp(argv[i], "--poke") && more) {   // FRAME:hexaddr:hexvalue - debugging: write a word of guest memory at that frame
+            const std::string s = argv[++i];
+            const size_t c1 = s.find(':'), c2 = s.find(':', c1 + 1);
+            if (c1 != std::string::npos && c2 != std::string::npos) pokes.push_back({std::strtoull(s.c_str(), nullptr, 10), uint32_t(std::strtoul(s.c_str() + c1 + 1, nullptr, 16)), uint32_t(std::strtoul(s.c_str() + c2 + 1, nullptr, 16))});
+        }
+        else if (!std::strcmp(argv[i], "--fake-request") && more) {   // FRAME:HEXLEVEL - tests: the game "asks for" that level at that frame
+            const std::string s = argv[++i];
+            const size_t c = s.find(':');
+            if (c != std::string::npos) fakeRequests.push_back({std::strtoull(s.c_str(), nullptr, 10), int(std::strtol(s.c_str() + c + 1, nullptr, 16)), false});
+        }
         else if (!std::strcmp(argv[i], "--rel")) relativeFrames = true;   // frame numbers of --press / --capture / --save-state-at / --pace-from count from the loaded state
         else if (!std::strcmp(argv[i], "--save-state-at") && more) {   // FRAME:file - save a state at that frame and quit (makes a state from a scripted run)
             const std::string s = argv[++i];
@@ -339,6 +354,10 @@ int main(int argc, char** argv) {
 
     // Online play hooks the original game's object update, which only the interpreter runs.
     cb2mp::Multiplayer mp(p);
+    // Personal records and the level timer work offline too; they need the interpreter (the hooks), like online play.
+    cb2run::Tracker tracker(p, (std::filesystem::path(exeDir) / "records.txt").string());
+    if (!nativeCode) tracker.install();
+    mp.setTracker(&tracker);
     bool onlineStarted = false;
     // The lobby comes first when nothing on the command line already decided between playing alone and online.
     const bool commandLineOnline = online.online || online.fake;
@@ -395,6 +414,7 @@ int main(int argc, char** argv) {
     settings.nameTags = cfg.nameTags;
     settings.opacity = cfg.opacity;
     settings.roster = cfg.roster;
+    settings.timer = cfg.timer;
     settings.keys.load(cfg.keyNames, cfg.padNames);
     psx::AudioOut audio;
     if (audio.start(44100)) p.spu.sink = [&](int16_t l, int16_t r) {
@@ -404,7 +424,7 @@ int main(int argc, char** argv) {
     else std::fprintf(stderr, "no audio device; continuing silently\n");
     std::vector<uint32_t> rgba(1024 * 512, 0xFF000000u);
     int shot = 0;
-    bool f1Down = false, f2Down = false, f11Down = false, f5Down = false, f6Down = false, f9Down = false, f3Down = false, rightWas = false;
+    bool f1Down = false, f2Down = false, f11Down = false, f5Down = false, f6Down = false, f9Down = false, f3Down = false, f4Down = false, rightWas = false;
     cb2hud::Hud hud;
     cb2roster::Roster roster;
     std::vector<cb2roster::Event> rosterEvents;
@@ -446,6 +466,7 @@ int main(int argc, char** argv) {
         cfg.remember(exeDir, "nametags", settings.nameTags ? "on" : "off");
         cfg.remember(exeDir, "opacity", std::to_string(settings.opacity));
         cfg.remember(exeDir, "roster", settings.roster ? "on" : "off");
+        cfg.remember(exeDir, "timer", settings.timer ? "on" : "off");
         for (int i = 0; i < cb2input::kBindingCount; ++i) {
             cfg.remember(exeDir, std::string("key_") + cb2input::kBindings[i].id, cb2input::keyName(settings.keys.key[i]));
             cfg.remember(exeDir, std::string("pad_") + cb2input::kBindings[i].id, cb2input::padName(settings.keys.pad[i]));
@@ -463,13 +484,36 @@ int main(int argc, char** argv) {
     double t0 = glfwGetTime();
     uint64_t base = p.frames;
     bool quitRequested = false;
+    // CB2_FRAMELOG=1: report every pass of the main loop that took more than 60 ms of wall time, with what the online code spent in it.
+    const bool frameLog = std::getenv("CB2_FRAMELOG") != nullptr;
+    auto loopStart = std::chrono::steady_clock::now();
+    uint64_t lastLogFrame = p.frames;
+    cb2mp::Multiplayer::Profile lastProf{};
+    uint64_t sectorsRead = 0, lastSectors = 0, lastInstr = 0;
+    std::string lastDiscFile;
+    double msRun = 0, msRender = 0, msSwap = 0, lastRun = 0, lastRender = 0, lastSwap = 0;
+    auto since = [](std::chrono::steady_clock::time_point a) { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count(); };
+    if (frameLog) p.cd.onSectorRead = [&](uint32_t lba) {
+        ++sectorsRead;
+        const std::string f = p.disc.fileAt(lba);
+        if (f != lastDiscFile) {
+            lastDiscFile = f;
+            std::printf("[disc] frame %llu: reading %s (sector %u) pc=%08x ra=%08x\n", (unsigned long long)p.frames, f.c_str(), lba, p.cpu.pc, p.cpu.r[31]);
+            std::fflush(stdout);
+        }
+    };
+    auto refreshRecords = [&] {
+        std::vector<cb2menu::RecordRow> rows;
+        for (const auto& [id, b] : tracker.stored().all())
+            rows.push_back({cb2roster::levelName(id), b.bestMs ? cb2roster::formatTime(double(b.bestMs) / 1000.0) : "-", std::to_string(b.finishes) + " / " + std::to_string(b.attempts)});
+        menu.setRecords(std::move(rows));
+    };
+    refreshRecords();
     // Save states (F5 save, F9 load, F6 next slot): practice and test runs start from any moment of the game. Files: <exe folder>\states\slotN.cb2state
     int stateSlot = 1;
     auto slotPath = [&](int n) { return (std::filesystem::path(exeDir) / "states" / ("slot" + std::to_string(n) + ".cb2state")).string(); };
     auto doSave = [&](const std::string& path) {
-        std::vector<uint8_t> extra(4);
-        const uint32_t lvl = mp.levelId();
-        std::memcpy(extra.data(), &lvl, 4);
+        const std::vector<uint8_t> extra = tracker.saveExtra();
         std::string err;
         const bool ok = psx::saveState(p, path, extra, err);
         if (!ok) std::fprintf(stderr, "save state: %s\n", err.c_str());
@@ -483,6 +527,7 @@ int main(int argc, char** argv) {
             uint32_t lvl = 0xFF;
             if (extra.size() >= 4) std::memcpy(&lvl, extra.data(), 4);
             mp.stateLoaded(lvl);
+            tracker.stateLoaded(extra);
             t0 = glfwGetTime();
             base = p.frames;
             suppressPad = true;
@@ -501,9 +546,23 @@ int main(int argc, char** argv) {
             if (saveStateFrame) saveStateFrame += p.frames;
             if (paceFrom) paceFrom += p.frames;
             if (menuAt) menuAt += p.frames;
+            for (Poke& pk : pokes) pk.frame += p.frames;
+            for (FakeRequest& fr : fakeRequests) fr.frame += p.frames;
         }
     }
     while (!glfwWindowShouldClose(win) && !quitRequested) {
+        if (frameLog) {
+            const auto nowT = std::chrono::steady_clock::now();
+            const double ms = std::chrono::duration<double, std::milli>(nowT - loopStart).count();
+            if (ms > 60.0 && p.frames != lastLogFrame) {
+                const auto& pr = mp.prof;
+                std::printf("[frame] %.0f ms for %llu frames (at %llu), level %02X, puppets %d, disc sectors +%llu, %.1fM guest instructions; emulate %.1f ms, render %.1f ms, swap+poll %.1f ms; online: manage %.1f ms, tags %.1f ms, tick %.1f ms (%llu calls), spawns +%llu kills +%llu\n", ms,
+                            (unsigned long long)(p.frames - lastLogFrame), (unsigned long long)p.frames, mp.levelId(), mp.puppetCount(), (unsigned long long)(sectorsRead - lastSectors), double(p.cpu.instructions - lastInstr) / 1e6, msRun - lastRun, msRender - lastRender, msSwap - lastSwap, pr.manageMs - lastProf.manageMs, pr.tagsMs - lastProf.tagsMs,
+                            pr.tickMs - lastProf.tickMs, (unsigned long long)(pr.tickCalls - lastProf.tickCalls), (unsigned long long)(pr.spawns - lastProf.spawns), (unsigned long long)(pr.kills - lastProf.kills));
+                std::fflush(stdout);
+            }
+            if (p.frames != lastLogFrame) { loopStart = nowT; lastLogFrame = p.frames; lastProf = mp.prof; lastSectors = sectorsRead; lastInstr = p.cpu.instructions; lastRun = msRun; lastRender = msRender; lastSwap = msSwap; }
+        }
         // scripted menu input (tests): open, wait:N (N x 16 ms), shot:file.png, exit, or anything the menu understands
         if (!menuScript.empty() && p.frames >= menuAt && menuPos < menuScript.size() && glfwGetTime() >= menuWaitUntil) {
             const std::string& tok = menuScript[menuPos++];
@@ -578,10 +637,12 @@ int main(int argc, char** argv) {
             continue;
         }
         if (due > 8.0 || fast) { t0 = glfwGetTime(); base = p.frames; }
+        const auto runBegan = std::chrono::steady_clock::now();
         for (int step = 0; step < std::min(int(due), 4) && err.empty(); ++step) {
             frameReady = false;
             while (!frameReady && err.empty()) err = p.run(20000);
         }
+        msRun += since(runBegan);
         }
         if (!err.empty()) { std::fprintf(stderr, "guest stopped: %s\n", err.c_str()); break; }
 
@@ -591,7 +652,17 @@ int main(int argc, char** argv) {
             break;
         }
         mp.showTags = settings.nameTags;
+        for (Poke& pk : pokes) if (!pk.done && p.frames >= pk.frame) { pk.done = true; p.poke32(pk.addr, pk.value); std::printf("poked %08x = %08x at frame %llu\n", pk.addr, pk.value, (unsigned long long)p.frames); }
         mp.opacity = settings.opacity;
+        for (FakeRequest& fr : fakeRequests) if (!fr.done && p.frames >= fr.frame) { fr.done = true; tracker.debugRequest(fr.level); }
+        for (const cb2run::Event& ev : tracker.takeEvents()) {
+            ++mp.runCounter;
+            refreshRecords();
+            const std::string where = cb2roster::levelName(ev.run.level), time = cb2roster::formatTime(double(ev.run.ms) / 1000.0);
+            if (!ev.run.finished) hud.notice("GAME OVER IN " + where + "  " + time, cb2ui::kRed, glfwGetTime());
+            else if (ev.newBest) hud.notice("NEW BEST  " + where + "  " + time + (ev.previousBest ? "  (WAS " + cb2roster::formatTime(double(ev.previousBest) / 1000.0) + ")" : ""), cb2ui::kGold1, glfwGetTime());
+            else hud.notice("FINISHED " + where + "  " + time + "  (BEST " + cb2roster::formatTime(double(tracker.bestMsFor(ev.run.level)) / 1000.0) + ")", cb2ui::kGreen, glfwGetTime());
+        }
         if (mp.active()) {
             roster.update(mp.others(), glfwGetTime(), rosterEvents);
             for (const cb2roster::Event& e : rosterEvents) {
@@ -599,6 +670,8 @@ int main(int argc, char** argv) {
                 if (e.kind == K::Joined) hud.notice(e.name + " JOINED THE ROOM", cb2ui::kGreen, glfwGetTime());
                 else if (e.kind == K::Left) hud.notice(e.name + " LEFT THE ROOM", cb2ui::kRed, glfwGetTime());
                 else if (e.kind == K::EnteredLevel) hud.notice(e.name + " ENTERED " + cb2roster::levelName(e.level), cb2ui::kTeal, glfwGetTime());
+                else if (e.kind == K::Finished) hud.notice(e.name + " FINISHED " + cb2roster::levelName(e.level) + "  " + cb2roster::formatTime(e.seconds), cb2ui::kGold1, glfwGetTime());
+                else if (e.kind == K::Failed) hud.notice(e.name + " GAME OVER IN " + cb2roster::levelName(e.level), cb2ui::kRed, glfwGetTime());
                 else hud.notice(e.name + " LEFT " + cb2roster::levelName(e.level) + "  " + cb2roster::formatTime(e.seconds), cb2ui::rgb(255, 176, 80), glfwGetTime());
             }
             rosterEvents.clear();
@@ -607,7 +680,9 @@ int main(int argc, char** argv) {
         const bool captureNow = captureFrame && p.frames >= captureFrame && (!captureAfterPuppet || (puppetSince && p.frames >= puppetSince + captureAfterPuppet));
         if (!paused) {
             p.gpu.flushTags();
+            const auto renderBegan = std::chrono::steady_clock::now();
             if (useHires) hires.render(p.gpu);
+            msRender += since(renderBegan);
         }
         const auto& g = p.gpu;
         const bool hiPath = showHires && g.displayEnabled && !g.color24;
@@ -661,26 +736,32 @@ int main(int argc, char** argv) {
         glBindVertexArray(vao);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         menu.draw(glfwGetTime());
-        if (mp.active() && !menu.isOpen()) {
+        if (!menu.isOpen()) {
             std::vector<cb2hud::Row> rows;
-            cb2hud::Row self;
-            self.name = mp.selfName();
-            self.rgb = 0xFFD040;
-            self.self = true;
-            self.inLevel = mp.levelId() != 0xFF;
-            self.where = self.inLevel ? cb2roster::levelName(int(mp.levelId())) : "MENU";
-            if (self.inLevel) self.time = cb2roster::formatTime(mp.levelSeconds());
-            rows.push_back(self);
-            for (const cb2roster::Member& m : roster.list()) {
-                cb2hud::Row r;
-                r.name = m.name;
-                r.rgb = cb2roster::playerRgb(m.id);
-                r.inLevel = m.level != 0xFF;
-                r.where = r.inLevel ? cb2roster::levelName(m.level) : "MENU";
-                if (r.inLevel) r.time = cb2roster::formatTime(roster.levelTime(m, glfwGetTime()));
-                else if (m.lastLevel != 0xFF) r.time = "LAST " + cb2roster::formatTime(m.lastTime);
-                rows.push_back(r);
+            if (mp.active()) {
+                cb2hud::Row self;
+                self.name = mp.selfName();
+                self.rgb = 0xFFD040;
+                self.self = true;
+                self.inLevel = tracker.level() != cb2run::kNoLevel;
+                self.where = self.inLevel ? cb2roster::levelName(tracker.level()) : "MENU";
+                if (self.inLevel && tracker.timing()) self.time = cb2roster::formatTime(double(tracker.levelMs()) / 1000.0);
+                if (const uint32_t b = tracker.bestMsFor(tracker.level())) self.best = cb2roster::formatTime(double(b) / 1000.0);
+                if (tracker.lastRun().finished) self.finished = cb2roster::levelName(tracker.lastRun().level) + " " + cb2roster::formatTime(double(tracker.lastRun().ms) / 1000.0);
+                rows.push_back(self);
+                for (const cb2roster::Member& m : roster.list()) {
+                    cb2hud::Row r;
+                    r.name = m.name;
+                    r.rgb = cb2roster::playerRgb(m.id);
+                    r.inLevel = m.level != 0xFF;
+                    r.where = r.inLevel ? cb2roster::levelName(m.level) : "MENU";
+                    if (r.inLevel) r.time = cb2roster::formatTime(roster.levelTime(m, glfwGetTime()));
+                    if (m.bestMs) r.best = cb2roster::formatTime(double(m.bestMs) / 1000.0);
+                    if (m.ranFinished && m.ranLevel != 0xFF) r.finished = cb2roster::levelName(m.ranLevel) + " " + cb2roster::formatTime(double(m.ranMs) / 1000.0);
+                    rows.push_back(r);
+                }
             }
+            hud.setTimer(settings.timer && tracker.timing() ? cb2roster::formatTime(double(tracker.levelMs()) / 1000.0) : std::string());
             hud.draw(menu.surface(), rows, settings.roster, glfwGetTime());
         }
         {
@@ -701,8 +782,10 @@ int main(int argc, char** argv) {
             std::printf("window captured at frame %llu to %s (%dx%d), path %s\n", (unsigned long long)p.frames, capturePath.c_str(), fw, fh, hiPath ? "opengl" : "software");
             break;
         }
+        const auto swapBegan = std::chrono::steady_clock::now();
         glfwSwapBuffers(win);
         glfwPollEvents();
+        msSwap += since(swapBegan);
 
         p.padButtons = menu.isOpen() ? uint16_t(0xFFFF) : padNow();
         auto edge = [&](int key, bool& was) { const bool down = glfwGetKey(win, key) == GLFW_PRESS; const bool hit = down && !was; was = down; return hit; };
@@ -710,6 +793,7 @@ int main(int argc, char** argv) {
         if (edge(GLFW_KEY_F2, f2Down) && useHires) { showHires = !showHires; p.gpu.rasterize = !showHires; }
         if (edge(GLFW_KEY_F11, f11Down)) toggleFullscreen();
         if (edge(GLFW_KEY_F3, f3Down) && mp.active()) { settings.roster = !settings.roster; saveSettings(); }
+        if (edge(GLFW_KEY_F4, f4Down)) { settings.timer = !settings.timer; saveSettings(); }
         if (!menu.isOpen()) {
             if (edge(GLFW_KEY_F6, f6Down)) { stateSlot = stateSlot % 4 + 1; menu.toast("STATE SLOT " + std::to_string(stateSlot), glfwGetTime()); }
             if (edge(GLFW_KEY_F5, f5Down)) {

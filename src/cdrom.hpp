@@ -18,6 +18,7 @@ public:
     VirtualDisc* disc = nullptr;
     bool irqLine = false;          // asserted while (flags & enable) != 0; the platform mirrors it into I_STAT bit 2
     bool trace = false;                // print every register access and interrupt
+    uint64_t sectorsRead = 0;                      // sectors read so far (the online code waits for quiet before it touches the engine's heap)
     std::function<void(uint32_t)> onSectorRead;   // called with the LBA of every sector the controller reads (tools)
     uint64_t commandsSeen[0x20] = {};
 

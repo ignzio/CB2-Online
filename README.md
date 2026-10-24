@@ -86,6 +86,10 @@ then press the new key or game pad button. A key or button already in use swaps 
 (with the time they spent in it), and a **player list** at the right edge shows everybody's name, level and how long they have been in it
 (`F3` hides or shows the list; also in the menu).
 
+**Level times.** A timer at the top right (`F4`, or *Level timer* in the menu) times each level from the moment Crash can move until the
+game leaves it. Finished runs are saved as personal records in `records.txt` next to the exe and listed on the *Records* page of the menu;
+everybody in the room sees your best time and your latest finish in the player list. See [docs/SPEEDRUN.md](docs/SPEEDRUN.md).
+
 The picture is drawn by an OpenGL renderer at `--scale N` (default 4) times the original resolution. Projected
 vertices keep their unrounded GTE positions, so geometry does not wobble at high resolution (`CB2_NOPRECISE=1`
 disables this). `--native` runs the statically translated engine code (identical output to the interpreter).

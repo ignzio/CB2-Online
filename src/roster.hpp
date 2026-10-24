@@ -17,13 +17,13 @@ uint32_t playerRgb(int id);
 // 83.4 -> "1:23.4"
 std::string formatTime(double seconds);
 
-enum class EventKind { Joined, Left, EnteredLevel, LeftLevel };
+enum class EventKind { Joined, Left, EnteredLevel, LeftLevel, Finished, Failed };
 
 struct Event {
     EventKind kind = EventKind::Joined;
     std::string name;
     int level = 0xFF;      // the level entered or left
-    double seconds = 0;    // LeftLevel: how long they were in it
+    double seconds = 0;    // LeftLevel: how long they were in it; Finished / Failed: the time of the run
 };
 
 struct Member {
@@ -35,6 +35,12 @@ struct Member {
     int lastLevel = 0xFF;      // the level they were in before, and how long they spent there
     double lastTime = 0;
     bool seen = false;
+    // from their speedrun data (netproto.hpp)
+    uint32_t bestMs = 0;       // their personal best for the level they are in
+    int ranLevel = 0xFF;       // their latest run ...
+    uint32_t ranMs = 0;
+    bool ranFinished = false;
+    int runCount = 0;          // ... and the counter that tells a new run from the old one
 };
 
 class Roster {

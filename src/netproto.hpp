@@ -12,7 +12,7 @@
 
 namespace cb2net {
 
-constexpr const char* kVersionText = "1";   // game protocol version; the lobby directory only offers lobbies of the same version
+constexpr const char* kVersionText = "2";   // game protocol version; the lobby directory only offers lobbies of the same version
 constexpr uint16_t kDefaultPort = 7777;   // rendezvous server port; the game listens on the first free port of kLanPorts
 constexpr int kLanPorts = 10;             // 7777..7786: tried by LAN / same-PC discovery
 constexpr int kNameLength = 16;           // including the terminating zero
@@ -30,6 +30,13 @@ struct PlayerState {
     int32_t fgrp = 0;       // framegroup pointer minus the address of Crash's script entry (same data on every machine)
     int32_t fnum = 0;       // frame number field
     uint32_t flags = 0;     // status flags of the object (reserved)
+    // Speedrun data (docs/SPEEDRUN.md): the player's personal best for the level they are in (ms, 0 = none), and their latest run: the level, its
+    // time and whether it reached the end. `runCount` goes up with every run, so that receivers notice a new one even if the numbers are equal.
+    uint32_t bestMs = 0;
+    uint32_t lastMs = 0;
+    uint8_t lastLevel = 0xFF;
+    uint8_t lastFinished = 0;
+    uint8_t runCount = 0;
 };
 
 // IPv4 address and port exactly as the socket API reports them (network byte order).
@@ -55,7 +62,7 @@ enum PacketType : uint8_t {
     kRoomInfo = 10,  // player -> lobby: header + room name + number of players in it
 };
 constexpr size_t kHeaderSize = 4 + 1 + 4 + 4;   // magic, type, room, uid
-constexpr size_t kEntrySize = 1 + 1 + kNameLength + 9 * 4 + 2 * 4 + 4;
+constexpr size_t kEntrySize = 1 + 1 + kNameLength + 9 * 4 + 2 * 4 + 4 + 4 + 4 + 4;
 constexpr size_t kPeerEntrySize = 4 + kNameLength + 6 + 6;
 constexpr size_t kMaxPeersPerReply = 15;
 constexpr size_t kRoomEntrySize = kNameLength + 1;
@@ -96,6 +103,13 @@ inline void putState(std::vector<uint8_t>& o, const PlayerState& s) {
     put(o, &s.fgrp, 4);
     put(o, &s.fnum, 4);
     put(o, &s.flags, 4);
+    put(o, &s.bestMs, 4);
+    put(o, &s.lastMs, 4);
+    put(o, &s.lastLevel, 1);
+    put(o, &s.lastFinished, 1);
+    put(o, &s.runCount, 1);
+    const uint8_t pad = 0;
+    put(o, &pad, 1);
 }
 inline void getState(const uint8_t* d, PlayerState& s) {
     size_t o = 0;
@@ -108,7 +122,12 @@ inline void getState(const uint8_t* d, PlayerState& s) {
     std::memcpy(s.scale, d + o, 12); o += 12;
     std::memcpy(&s.fgrp, d + o, 4); o += 4;
     std::memcpy(&s.fnum, d + o, 4); o += 4;
-    std::memcpy(&s.flags, d + o, 4);
+    std::memcpy(&s.flags, d + o, 4); o += 4;
+    std::memcpy(&s.bestMs, d + o, 4); o += 4;
+    std::memcpy(&s.lastMs, d + o, 4); o += 4;
+    s.lastLevel = d[o++];
+    s.lastFinished = d[o++] ? 1 : 0;
+    s.runCount = d[o++];
 }
 }  // namespace detail
 

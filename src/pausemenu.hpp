@@ -25,10 +25,14 @@ struct Settings {
     bool nameTags = true;    // names over the other players (online)
     int opacity = 100;       // how solid the other players' Crashes are, 10..100
     bool roster = true;      // the player list at the right edge (online)
+    bool timer = true;       // the level timer in the corner
     cb2input::Keys keys;     // keyboard and game pad bindings
 };
 
 enum class Result { None, MainMenu, Quit };
+
+// One line of the Records page.
+struct RecordRow { std::string level, best, detail; };
 
 class PauseMenu {
 public:
@@ -62,11 +66,12 @@ public:
         for (char& c : toastText) c = char(std::toupper(static_cast<unsigned char>(c)));   // the font has capitals only
         toastUntil = seconds + 2.0;
     }
+    void setRecords(std::vector<RecordRow> rows) { recordRows = std::move(rows); }   // shown on the Records page; set before open()
     cb2ui::Canvas& surface() { return canvas; }   // for the overlay (hud.hpp), which draws with the same font
 
 private:
-    enum class Page { Closed, Main, Sound, Online, Controls, Capture, ConfirmMenu, ConfirmQuit };
-    enum Item { kResume, kSound, kOnline, kControls, kMainMenu, kQuit, kVolume, kFilter, kFullscreen, kTags, kOpacity, kRoster, kBack };
+    enum class Page { Closed, Main, Sound, Online, Records, Controls, Capture, ConfirmMenu, ConfirmQuit };
+    enum Item { kResume, kSound, kOnline, kRecords, kControls, kMainMenu, kQuit, kVolume, kFilter, kFullscreen, kTimer, kTags, kOpacity, kRoster, kBack };
     struct Hit { float x, y, w, h; int index; };
 
     cb2ui::Canvas canvas;
@@ -84,6 +89,8 @@ private:
     float mx = -1, my = -1, lastMx = -1, lastMy = -1;
     bool mouseDown = false, scriptDown = false;
     int dragging = -1;                 // item whose slider is being dragged
+    std::vector<RecordRow> recordRows;
+    int recordTop = 0;
     std::vector<Hit> hits;             // the clickable areas of the page, rebuilt by draw()
     float barX = 0, barW = 0;          // the slider bar of the rows (same for all rows)
 

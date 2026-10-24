@@ -10,6 +10,7 @@
 //   nametags = on                      names over the other players
 //   pad_cross = A                      game pad bindings, same ids; buttons A B X Y LB RB BACK START GUIDE LEFT STICK RIGHT STICK DPAD UP/RIGHT/DOWN/LEFT, triggers LT RT, NONE
 //   opacity = 100                      how solid the other players' Crashes are (10..100)
+//   timer   = on                       the level timer in the corner (F4 toggles it)
 //   roster  = on                       the list of players at the right edge (F3 toggles it in game)
 //   key_cross = Z                      keyboard bindings: key_up/down/left/right/cross/square/circle/triangle/l1/r1/l2/r2/start/select
 //   name    = Player                   name shown above your Crash in online play (cb2_play / Crash2.exe)
@@ -39,6 +40,7 @@ struct Config {
     std::map<std::string, std::string> keyNames, padNames;   // `key_cross = Z`, `pad_cross = A` (id -> name)
     int opacity = 100;         // how solid the other players' Crashes are drawn, 10..100 percent
     bool roster = true;        // the player list at the right edge (online)
+    bool timer = true;         // the level timer in the corner
     bool update = true;        // look for a newer release (see updater.hpp); update = off disables it
     bool lobby = true;         // show the online lobby before the game starts (lobby = off disables it)
 #ifndef CB2_DEFAULT_DIRECTORY

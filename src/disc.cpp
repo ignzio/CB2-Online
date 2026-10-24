@@ -1,6 +1,7 @@
 #include "disc.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -89,6 +90,7 @@ bool VirtualDisc::buildFromBundle(const std::string& bundleFile, const std::vect
 
 bool VirtualDisc::finish(const std::map<std::string, FileRef>& files, const std::string& volumeId) {
     nodes.clear(); meta.clear(); byPath.clear();
+    chunks.clear(); handles.clear(); extents.clear();
     nodes.push_back(Node{"", "", true, 0, 0, 0, {}, 0});
     std::map<std::string, int> dirIndex{{"", 0}};
     for (const auto& [rel, ref] : files) {
@@ -215,10 +217,56 @@ uint32_t VirtualDisc::fileLba(const std::string& path) const {
     return it == byPath.end() ? 0 : it->second;
 }
 
+int VirtualDisc::nodeForSector(uint32_t lba) const {
+    if (extents.empty()) {
+        for (size_t i = 0; i < nodes.size(); ++i)
+            if (!nodes[i].dir && nodes[i].size) extents.emplace_back(nodes[i].lba, int(i));
+        std::sort(extents.begin(), extents.end());
+    }
+    auto it = std::upper_bound(extents.begin(), extents.end(), std::make_pair(lba, INT32_MAX));
+    if (it == extents.begin()) return -1;
+    --it;
+    const Node& n = nodes[size_t(it->second)];
+    return lba < n.lba + (n.size + 2047) / 2048 ? it->second : -1;
+}
+
 std::string VirtualDisc::fileAt(uint32_t lba) const {
-    for (const auto& n : nodes)
-        if (!n.dir && lba >= n.lba && lba < n.lba + (n.size + 2047) / 2048) return n.host;
-    return {};
+    const int i = nodeForSector(lba);
+    return i < 0 ? std::string() : nodes[size_t(i)].host;
+}
+
+const VirtualDisc::Chunk* VirtualDisc::chunkFor(int nodeIndex, uint32_t chunkIndex) const {
+    Chunk* oldest = nullptr;
+    for (Chunk& c : chunks) {
+        if (c.node == nodeIndex && c.index == chunkIndex) { c.stamp = ++stampCounter; return &c; }
+        if (!oldest || c.stamp < oldest->stamp) oldest = &c;
+    }
+    Chunk* slot;
+    if (chunks.size() < kMaxChunks) { chunks.emplace_back(); slot = &chunks.back(); }
+    else slot = oldest;
+    const Node& n = nodes[size_t(nodeIndex)];
+    const uint64_t byteStart = uint64_t(chunkIndex) * kChunkSectors * 2048, fileSize = n.size;
+    const size_t want = size_t(std::min<uint64_t>(uint64_t(kChunkSectors) * 2048, fileSize > byteStart ? fileSize - byteStart : 0));
+    slot->node = nodeIndex;
+    slot->index = chunkIndex;
+    slot->stamp = ++stampCounter;
+    slot->data.assign(uint64_t(kChunkSectors) * 2048, 0);
+    std::ifstream* in = nullptr;
+    if (n.bundled) in = &bundleStream;
+    else {
+        auto h = handles.find(nodeIndex);
+        if (h == handles.end()) {
+            if (handles.size() >= 12) handles.clear();   // a handful of level files are in use at a time
+            h = handles.emplace(nodeIndex, std::ifstream(n.host, std::ios::binary)).first;
+        }
+        in = &h->second;
+    }
+    if (*in || n.bundled) {
+        in->clear();
+        in->seekg(std::streamoff((n.bundled ? n.offset : 0) + byteStart));
+        in->read(reinterpret_cast<char*>(slot->data.data()), std::streamsize(want));
+    }
+    return slot;
 }
 
 bool VirtualDisc::readSector(uint32_t lba, uint8_t* out) const {
@@ -231,20 +279,11 @@ bool VirtualDisc::readSector(uint32_t lba, uint8_t* out) const {
     uint8_t* data = out + 24;
     auto m = meta.find(lba);
     if (m != meta.end()) { std::memcpy(data, m->second.data(), 2048); return true; }
-    for (const auto& n : nodes) {
-        if (n.dir || lba < n.lba || lba >= n.lba + (n.size + 2047) / 2048) continue;
-        if (n.bundled) {
-            bundleStream.clear();
-            bundleStream.seekg(std::streamoff(n.offset + uint64_t(lba - n.lba) * 2048));
-            bundleStream.read(reinterpret_cast<char*>(data), 2048);
-            return true;
-        }
-        std::ifstream f(n.host, std::ios::binary);
-        if (!f) return true;
-        f.seekg(std::streamoff(uint64_t(lba - n.lba) * 2048));
-        f.read(reinterpret_cast<char*>(data), 2048);
-        return true;
-    }
+    const int ni = nodeForSector(lba);
+    if (ni < 0) return true;
+    const uint32_t within = lba - nodes[size_t(ni)].lba;
+    const Chunk* c = chunkFor(ni, within / kChunkSectors);
+    std::memcpy(data, c->data.data() + size_t(within % kChunkSectors) * 2048, 2048);
     return true;
 }
 

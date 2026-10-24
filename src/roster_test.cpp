@@ -69,6 +69,31 @@ int main() {
     CHECK(ev.size() == 1 && ev[0].kind == EventKind::Joined);
     CHECK(r.list()[0].id == 1 && r.list()[1].id == 2);   // kept in id order
 
+    // a run finished: only the counter tells a new run from the old one
+    {
+        Roster q;
+        std::vector<Event> e2;
+        auto withRun = [&](int count, int lvl, uint32_t ms, bool fin) { cb2net::PlayerState s = player(1, "CARA", 0x02); s.runCount = uint8_t(count); s.lastLevel = uint8_t(lvl); s.lastMs = ms; s.lastFinished = fin; s.bestMs = 61000; return s; };
+        q.update({withRun(3, 0x1E, 90000, true)}, 1.0, e2);          // she had runs before we met: not news
+        CHECK(e2.size() == 2 && e2[0].kind == EventKind::Joined && e2[1].kind == EventKind::EnteredLevel);   // she is in the warp room already
+        CHECK(q.list()[0].bestMs == 61000);
+        e2.clear();
+        q.update({withRun(3, 0x1E, 90000, true)}, 2.0, e2);
+        CHECK(e2.empty());
+        q.update({withRun(4, 0x0E, 83400, true)}, 3.0, e2);           // a new finished run
+        CHECK(e2.size() == 1 && e2[0].kind == EventKind::Finished && e2[0].level == 0x0E && std::abs(e2[0].seconds - 83.4) < 1e-9 && e2[0].name == "CARA");
+        e2.clear();
+        q.update({withRun(5, 0x0E, 40000, false)}, 4.0, e2);          // a failed one (game over)
+        CHECK(e2.size() == 1 && e2[0].kind == EventKind::Failed);
+        e2.clear();
+        q.update({withRun(5, 0x0E, 40000, false)}, 5.0, e2);
+        CHECK(e2.empty());
+        // the counter wraps around 255 -> 0: still a new run
+        q.update({withRun(255, 0x0E, 40000, true)}, 6.0, e2);
+        e2.clear();
+        q.update({withRun(0, 0x0E, 39000, true)}, 7.0, e2);
+        CHECK(e2.size() == 1 && e2[0].kind == EventKind::Finished);
+    }
     // times
     CHECK(formatTime(83.4) == "1:23.4");
     CHECK(formatTime(0) == "0:00.0");

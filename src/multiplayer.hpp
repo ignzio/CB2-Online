@@ -15,6 +15,8 @@
 #include "net.hpp"
 #include "psx.hpp"
 
+namespace cb2run { class Tracker; }
+
 namespace cb2mp {
 
 struct Options {
@@ -44,9 +46,13 @@ public:
     std::vector<cb2net::PlayerState> others();                 // remote players (or the test ghost)
     int puppetCount() const { return int(puppets.size()); }
     uint32_t levelId() const { return level; }
+    void setTracker(const cb2run::Tracker* t) { runs = t; }   // the speedrun data that is sent along with the player's state
+    uint8_t runCounter = 0;                                   // goes up when a run ends
     // The console was rewound by a loaded save state: forget everything tracked about the game's objects (they are all different now).
     void stateLoaded(uint32_t levelNow);
     const std::string& selfName() const { return playerName; }
+    // Where the time goes (CB2_FRAMELOG): milliseconds spent in manage() / buildTags() and how many puppets were created / removed since the start.
+    struct Profile { uint64_t failures = 0, deferred = 0; double manageMs = 0, tagsMs = 0; uint64_t spawns = 0, kills = 0, tickCalls = 0; double tickMs = 0; } prof;
     int opacity = 100;                                         // how solid the other players' Crashes are drawn (percent, 10..100)
     double levelSeconds() const { return double(p.frames - levelStartFrame) / 59.94; }   // game time in the current level (stands still while paused)
     bool showTags = true;                                      // the pause menu's "Name tags"
@@ -82,6 +88,7 @@ private:
         bool haveColumns = false;
     };
     psx::Platform& p;
+    const cb2run::Tracker* runs = nullptr;
     cb2net::Session net;
     Options opt;
     std::string playerName;
@@ -90,6 +97,13 @@ private:
     uint64_t playerSince = 0;              // frame the current player object was first seen
     uint32_t level = 0xFF;                 // level the game has loaded (0xFF = unknown)
     uint64_t managedFrame = ~0ull, lastScan = 0;
+    // Creating and removing objects calls into the engine's allocator. That must not happen while the engine is loading (its tables are being rebuilt),
+    // and a call that fails must never end the game: it is dropped and tried again later.
+    uint64_t lastCdSectors = 0, lastDiscFrame = 0, firstWantFrame = 0, retryAt = 0, disabledUntil = 0;
+    int spawnFailures = 0;
+    std::vector<uint8_t> undoRam, undoScratch;   // memory as it was before a call into the game, to put back if the call fails
+    bool engineBusy();                      // the disc was read in the last half second
+    template <class Fn> bool guarded(const char* what, Fn&& fn);   // runs fn; a thrown guest fault is logged and swallowed (false)
     uint64_t levelStartFrame = 0;          // frame in which the current level was opened
     uint32_t stepping = 0;                 // object being updated right now
     Puppet* steppingPuppet = nullptr;
@@ -118,6 +132,7 @@ private:
     void killObject(uint32_t obj);
     void drive(Puppet& pu, const cb2net::PlayerState& s);
     void publish();
+    void applyRuns(cb2net::PlayerState& s) const;
     void announce(uint32_t lvl);
     double now() const;
 };

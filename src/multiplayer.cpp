@@ -1,6 +1,7 @@
 #include "multiplayer.hpp"
 
 #include "roster.hpp"
+#include "runtracker.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -48,9 +49,19 @@ bool Multiplayer::start(const Options& options, std::string& error) {
 }
 
 // What others see of us while we are not in a level, or when we have just entered one: our name, no Crash yet.
+void Multiplayer::applyRuns(cb2net::PlayerState& s) const {
+    if (!runs) return;
+    s.bestMs = runs->bestMsFor(int(s.level));
+    s.lastLevel = uint8_t(runs->lastRun().level);
+    s.lastMs = runs->lastRun().ms;
+    s.lastFinished = runs->lastRun().finished ? 1 : 0;
+    s.runCount = runCounter;
+}
+
 void Multiplayer::announce(uint32_t lvl) {
     cb2net::PlayerState s;
     s.level = uint8_t(lvl);
+    applyRuns(s);
     std::strncpy(s.name, playerName.c_str(), cb2net::kNameLength - 1);
     s.fgrp = 0;
     net.setLocal(s);
@@ -188,7 +199,13 @@ void Multiplayer::onStepEnter(uint32_t obj) {
     steppingPuppet = nullptr;
     if (p.frames != managedFrame) {
         managedFrame = p.frames;
-        manage();
+        try { manage(); }
+        catch (const std::exception& e) {   // nothing in the online code may end the game
+            ++prof.failures;
+            disabledUntil = p.frames + 600;
+            std::printf("[mp] frame %llu: online update failed (%s); paused for ten seconds\n", (unsigned long long)p.frames, e.what());
+            std::fflush(stdout);
+        }
     }
     bool ours = false;
     for (auto& [id, pu] : puppets) {
@@ -239,6 +256,9 @@ void Multiplayer::onStepReturn() {
 }
 
 void Multiplayer::buildTags() {
+    struct Timer { double* sink; double t0; ~Timer() {} } timer{&prof.tagsMs, 0};
+    const auto began = std::chrono::steady_clock::now();
+    struct Done { Multiplayer* m; std::chrono::steady_clock::time_point b; ~Done() { m->prof.tagsMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - b).count(); } } done{this, began};
     if (puppets.empty() || samples.empty()) { samples.clear(); return; }
     using Mat = std::array<double, 9>;   // row-major, in the GTE's 1.3.12 fixed point units (4096 = 1.0)
     struct Group { Mat rt; size_t count = 0; float top = 1e9f, centre = 0, middle = 0; size_t begin = 0, end = 0; };
@@ -348,6 +368,7 @@ void Multiplayer::publish() {
     s.fnum = int32_t(p.peek32(player + F(kFrameNum)));
     s.flags = p.peek32(player + F(kStatusA));
     if (!haveLocal && debug()) std::printf("[mp] frame %llu: player object %08x, level %02X\n", (unsigned long long)p.frames, player, level);
+    applyRuns(s);
     localState = s;
     haveLocal = true;
     net.setLocal(s);
@@ -355,7 +376,10 @@ void Multiplayer::publish() {
 
 void Multiplayer::tick() {
     if (!net.active()) return;
-    net.update(now());
+    const double t0 = now();
+    net.update(t0);
+    prof.tickMs += (now() - t0) * 1000.0;
+    ++prof.tickCalls;
 }
 
 std::vector<cb2net::PlayerState> Multiplayer::others() {
@@ -372,13 +396,54 @@ std::vector<cb2net::PlayerState> Multiplayer::others() {
     return v;
 }
 
+bool Multiplayer::engineBusy() {
+    if (p.cd.sectorsRead != lastCdSectors) { lastCdSectors = p.cd.sectorsRead; lastDiscFrame = p.frames; }
+    return p.frames < lastDiscFrame + 30;
+}
+
+template <class Fn> bool Multiplayer::guarded(const char* what, Fn&& fn) {
+    // A function called into the game gets a budget of a few hundred thousand instructions (creating an object takes a few thousand).
+    static const uint64_t budget = std::getenv("CB2_MPBUDGET") ? std::strtoull(std::getenv("CB2_MPBUDGET"), nullptr, 10) : 400'000;
+    const uint64_t old = p.callBudget;
+    p.callBudget = budget;
+    // Transaction: a call that fails halfway (a fault, or it ran out of budget) has already changed the engine's memory; put all of it back, so that
+    // the engine carries on exactly as if the call had never been made.
+    undoRam.assign(p.ram.begin(), p.ram.end());
+    undoScratch.assign(p.cpu.scratch, p.cpu.scratch + sizeof p.cpu.scratch);
+    bool ok = true;
+    try { fn(); }
+    catch (const std::exception& e) {
+        ok = false;
+        ++prof.failures;
+        std::memcpy(p.ram.data(), undoRam.data(), undoRam.size());
+        std::memcpy(p.cpu.scratch, undoScratch.data(), undoScratch.size());
+        std::printf("[mp] frame %llu: %s failed inside the game (%s); online play carries on\n", (unsigned long long)p.frames, what, e.what());
+        std::fflush(stdout);
+    }
+    p.callBudget = old;
+    return ok;
+}
+
 uint32_t Multiplayer::spawnPuppet() {
-    const uint32_t obj = p.callFunction(kCreateObject, {kPuppetParent, 0, kPuppetSubtype, 0}, {0, 0});
+    ++prof.spawns;
+    uint32_t obj = 0;
+    static const bool forceFault = std::getenv("CB2_MPFAULT") != nullptr;   // tests: the first spawns call the engine with a bad parent
+    const uint32_t parent = (forceFault && prof.spawns <= 2) ? 0xFFFFFFF0u : kPuppetParent;
+    const bool ok = guarded("creating a player's Crash", [&] { obj = p.callFunction(kCreateObject, {parent, 0, kPuppetSubtype, 0}, {0, 0}); });
+    if (!ok) {
+        // do not hammer the engine: wait, and give up on this level after a few failures in a row
+        retryAt = p.frames + 120 * uint64_t(1 + spawnFailures);
+        if (++spawnFailures >= 4) disabledUntil = p.frames + 1800;
+        return 0;
+    }
+    spawnFailures = 0;
+    if (std::getenv("CB2_MPDEBUG")) std::printf("[mp] frame %llu: creating a Crash took %llu guest instructions\n", (unsigned long long)p.frames, (unsigned long long)p.lastCallInstructions);
     return isObject(obj) && obj != player ? obj : 0;
 }
 
 void Multiplayer::killObject(uint32_t obj) {
-    try { p.callFunction(kDestroyObject, {obj, 0}); } catch (const std::exception&) {}
+    ++prof.kills;
+    guarded("removing a player's Crash", [&] { p.callFunction(kDestroyObject, {obj, 0}); });
     if (isObject(obj) && std::find(zombies.begin(), zombies.end(), obj) == zombies.end()) zombies.push_back(obj);
 }
 
@@ -389,6 +454,8 @@ void Multiplayer::destroyPuppet(Puppet& pu) {
 
 // Once per frame, at the first object update: make the set of puppets match the players who are here.
 void Multiplayer::manage() {
+    const auto began = std::chrono::steady_clock::now();
+    struct Done { Multiplayer* m; std::chrono::steady_clock::time_point b; ~Done() { m->prof.manageMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - b).count(); } } done{this, began};
     if (!findPlayer() || level == 0xFF || level == 0x3C) {
         // With no Crash to work from, still forget puppets the engine has thrown away (a level restart frees every object).
         for (auto it = puppets.begin(); it != puppets.end();) {
@@ -437,13 +504,19 @@ void Multiplayer::manage() {
     for (const cb2net::PlayerState& s : others())
         if (s.level == level && s.fgrp != 0) here[s.id] = s;
 
+    // While the engine is loading (disc reads in the last half second) nothing is created or removed, for at most five seconds in a row.
+    const bool busy = engineBusy();
+    if (busy && firstWantFrame == 0) firstWantFrame = p.frames;
+    if (!busy) firstWantFrame = 0;
+    const bool deferWork = busy && p.frames < firstWantFrame + 300;
+    if (deferWork) ++prof.deferred;
     for (auto it = puppets.begin(); it != puppets.end();) {
         const bool gone = here.find(it->first) == here.end();
         const Puppet& pp = it->second;
         // objects made while a cutscene runs can end up with an unusable record for good: replace them
         const bool stale = pp.broken || (isPuppet(pp.obj) && !recordValid(pp.obj) && p.frames > pp.spawnedAtFrame + 120) ||
                            (running && p.frames > std::max<uint64_t>(pp.spawnedAtFrame, pp.lastStep) + 90);   // the game stopped updating it: it is not in the live world
-        if (gone || stale || !isPuppet(pp.obj)) {
+        if ((gone || stale || !isPuppet(pp.obj)) && !(deferWork && isPuppet(pp.obj))) {
             if (debug()) std::printf("[mp] frame %llu: removing puppet %08x (%s)\n", (unsigned long long)p.frames, it->second.obj, gone ? "player left" : stale ? "not updated by the game" : "object vanished");
             destroyPuppet(it->second);
             it = puppets.erase(it);
@@ -453,7 +526,7 @@ void Multiplayer::manage() {
     }
     for (const auto& [id, s] : here) {
         if (puppets.count(id)) { puppets[id].name = s.name; continue; }
-        if (!settled) continue;
+        if (!settled || deferWork || p.frames < retryAt || p.frames < disabledUntil) continue;
         if (puppets.size() >= 8) break;
         Puppet pu;
         pu.obj = spawnPuppet();

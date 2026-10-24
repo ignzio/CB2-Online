@@ -48,6 +48,8 @@ void Roster::update(const std::vector<cb2net::PlayerState>& others, double now, 
             m->joinedAt = now;
             m->levelSince = now;
             m->level = level;
+            m->runCount = s.runCount;   // runs made before we met are not news
+            m->ranLevel = s.lastLevel; m->ranMs = s.lastMs; m->ranFinished = s.lastFinished != 0;
             Event e;
             e.kind = EventKind::Joined;
             e.name = m->name;
@@ -55,6 +57,16 @@ void Roster::update(const std::vector<cb2net::PlayerState>& others, double now, 
             if (level != 0xFF) { e.kind = EventKind::EnteredLevel; e.level = level; events.push_back(e); }
         } else {
             m->name = s.name;
+            if (s.runCount != m->runCount) {   // they finished (or failed) a run
+                m->runCount = s.runCount;
+                m->ranLevel = s.lastLevel; m->ranMs = s.lastMs; m->ranFinished = s.lastFinished != 0;
+                Event e;
+                e.kind = m->ranFinished ? EventKind::Finished : EventKind::Failed;
+                e.name = m->name;
+                e.level = m->ranLevel;
+                e.seconds = double(m->ranMs) / 1000.0;
+                events.push_back(e);
+            }
             if (level != m->level) {
                 if (m->level != 0xFF) {
                     Event e;
@@ -77,6 +89,7 @@ void Roster::update(const std::vector<cb2net::PlayerState>& others, double now, 
                 }
             }
         }
+        m->bestMs = s.bestMs;
         m->seen = true;
     }
     for (auto it = members.begin(); it != members.end();) {

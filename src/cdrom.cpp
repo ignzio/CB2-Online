@@ -28,6 +28,7 @@ void CdRom::deliver() {
 }
 
 void CdRom::loadSector(uint32_t at) {
+    ++sectorsRead;
     if (onSectorRead) onSectorRead(at);
     uint8_t raw[2352];
     if (!disc || !disc->readSector(at, raw)) { sectorBuf.assign(2048, 0); return; }

@@ -114,8 +114,13 @@ control Crash.
 - **Local state.** When the game updates Crash's object (hook on `0x8001C718`) the module reads position, rotation, scale,
   animation (frame group relative to the object's entry, frame number) and sends it, 30 times a second, over UDP to every
   other player in the room (`net.cpp`, Winsock; packet format in `netproto.hpp`). A player says goodbye when leaving; one that is
-  silent for 4 s (a crash, a cable) disappears anyway. While you are in a menu or a loading screen you still announce your name, so
-  the others do not keep drawing your old position.
+  silent for 10 s (a crash, a cable; long enough that a slow level load on someone's PC does not make everyone delete and re-create
+  their Crash) disappears anyway. While you are in a menu or a loading screen you still announce your name, so
+  the others do not keep drawing your old position. The state packet also carries the run data of [SPEEDRUN.md](SPEEDRUN.md)
+  (protocol version 2: v0.3 and v0.4 clients do not see each other).
+- **Loading safety.** Creating or deleting a puppet while the game streams a level from the disc is postponed until the disc is idle
+  (at most 5 s), every engine call the module makes has an instruction budget, and a call that fails is rolled back and retried later, so
+  a problem with a puppet can no longer take the game down.
 - **Remote Crashes.** For every remote player in the same level the module calls the game's own object-creation routine
   (`0x80019800`, type 0 / subtype 1 gives a second `Will.C` object) and hangs it from a list the object loop always walks. The
   object's script never runs (calls into the script interpreter, `0x8003A014`, for these objects are answered with "carry on"; a

@@ -59,12 +59,13 @@ std::vector<PauseMenu::Item> PauseMenu::items() const {
     case Page::Main: {
         std::vector<Item> v = {kResume, kSound};
         if (ctx.online) v.push_back(kOnline);
+        v.push_back(kRecords);
         v.push_back(kControls);
         v.push_back(kMainMenu);
         v.push_back(kQuit);
         return v;
     }
-    case Page::Sound: return {kVolume, kFilter, kFullscreen, kBack};
+    case Page::Sound: return {kVolume, kFilter, kFullscreen, kTimer, kBack};
     case Page::Online: return {kTags, kOpacity, kRoster, kBack};
     default: return {};
     }
@@ -86,6 +87,7 @@ void PauseMenu::adjust(Item item, int d) {
     case kFullscreen: if (ctx.toggleFullscreen) ctx.toggleFullscreen(); break;
     case kTags: s->nameTags = !s->nameTags; changed = true; break;
     case kRoster: s->roster = !s->roster; changed = true; break;
+    case kTimer: s->timer = !s->timer; changed = true; break;
     default: break;
     }
 }
@@ -104,11 +106,12 @@ void PauseMenu::activate(Item item) {
     case kResume: close(); break;
     case kSound: setPage(Page::Sound); break;
     case kOnline: setPage(Page::Online); break;
+    case kRecords: setPage(Page::Records); recordTop = 0; break;
     case kControls: setPage(Page::Controls); controlsSel = 0; column = 0; break;
     case kMainMenu: mainSel = sel; page = Page::ConfirmMenu; confirmSel = 1; break;
     case kQuit: mainSel = sel; page = Page::ConfirmQuit; confirmSel = 1; break;
     case kBack: setPage(Page::Main); break;
-    case kFilter: case kFullscreen: case kTags: case kRoster: adjust(item, 1); break;
+    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: adjust(item, 1); break;
     default: break;
     }
 }
@@ -162,6 +165,12 @@ void PauseMenu::key(int k, int action) {
         }
         return;
     }
+    if (page == Page::Records) {
+        const int n = int(recordRows.size());
+        if (up) recordTop = std::max(0, std::min(std::max(0, n - 9), recordTop + up));
+        else if (esc || enter) setPage(Page::Main);
+        return;
+    }
     // list pages
     const auto list = items();
     sel = std::min(sel, int(list.size()) - 1);
@@ -190,6 +199,7 @@ void PauseMenu::wheel(float notches) {
     const int d = notches > 0 ? -1 : 1;
     if (page == Page::Controls) move(controlsSel, kControlRows, d);
     else if (page == Page::ConfirmMenu || page == Page::ConfirmQuit) confirmSel = 1 - confirmSel;
+    else if (page == Page::Records) recordTop = std::max(0, std::min(std::max(0, int(recordRows.size()) - 9), recordTop + (notches > 0 ? -1 : 1)));
     else if (page != Page::Capture) { const int n = int(items().size()); if (n) move(sel, n, d); }
 }
 
@@ -210,6 +220,7 @@ void PauseMenu::mouse(float x, float y, bool down) {
     if (h < 0) return;
     const int index = hits[size_t(h)].index;
     if (page == Page::Capture) return;
+    if (page == Page::Records) { if (pressed) setPage(Page::Main); return; }
     if (page == Page::ConfirmMenu || page == Page::ConfirmQuit) {
         if (moved) confirmSel = index;
         if (pressed) { confirmSel = index; key(GLFW_KEY_ENTER, GLFW_PRESS); }
@@ -304,6 +315,7 @@ void PauseMenu::draw(double t) {
             case kResume: centredRow(idx, y, on, "RESUME"); break;
             case kSound: centredRow(idx, y, on, "SOUND AND PICTURE"); break;
             case kOnline: centredRow(idx, y, on, "ONLINE"); break;
+            case kRecords: centredRow(idx, y, on, "RECORDS"); break;
             case kControls: centredRow(idx, y, on, "CONTROLS"); break;
             case kMainMenu: centredRow(idx, y, on, "MAIN MENU"); break;
             case kQuit: centredRow(idx, y, on, "QUIT GAME"); break;
@@ -322,6 +334,7 @@ void PauseMenu::draw(double t) {
             }
             case kFilter: valueRow(idx, y, on, "PICTURE", filterName(s->filter), kTeal); break;
             case kFullscreen: valueRow(idx, y, on, "FULLSCREEN", ctx.isFullscreen && ctx.isFullscreen() ? "ON" : "OFF", kTeal); break;
+            case kTimer: valueRow(idx, y, on, "LEVEL TIMER", s->timer ? "ON" : "OFF", kTeal); break;
             case kTags: valueRow(idx, y, on, "NAME TAGS", s->nameTags ? "ON" : "OFF", kTeal); break;
             case kRoster: valueRow(idx, y, on, "PLAYER LIST", s->roster ? "ON" : "OFF", kTeal); break;
             }
@@ -331,6 +344,27 @@ void PauseMenu::draw(double t) {
         }
         if (page == Page::Main && ctx.online) canvas.centred("ONLINE: THE OTHERS SEE YOU STAND STILL WHILE THIS IS OPEN", 432, 15, kDim);
         hint = "UP DOWN  SELECT      LEFT RIGHT  CHANGE      ENTER  CHOOSE      ESC  BACK";
+    } else if (page == Page::Records) {
+        canvas.centred("RECORDS", 22, 46, kGold1, kGold2);
+        canvas.text("LEVEL", 70, 78, 14, kDim);
+        canvas.text("BEST", 330, 78, 14, kDim);
+        canvas.text("RUNS", 470, 78, 14, kDim);
+        const int n = int(recordRows.size());
+        if (n == 0) {
+            canvas.centred("NO FINISHED LEVEL YET", 200, 24, kWhite1, kWhite2);
+            canvas.centred("YOUR TIMES ARE SAVED IN RECORDS.TXT NEXT TO THE GAME", 240, 15, kDim);
+        }
+        for (int i = 0; i < std::min(9, n - recordTop); ++i) {
+            const RecordRow& r = recordRows[size_t(recordTop + i)];
+            const float y = 100 + float(i) * 34;
+            slim(canvas, 56, y, 528, 28, i % 2 == 0);
+            canvas.text(r.level, 70, y + 4, 18, kWhite1, kWhite2);
+            canvas.text(r.best, 330, y + 4, 18, r.best == "-" ? kDim : kGreen);
+            canvas.text(r.detail, 470, y + 6, 15, kDim);
+        }
+        if (recordTop > 0) canvas.triangle(320, 94, 308, 90, 332, 90, kGold1);
+        if (recordTop + 9 < n) canvas.triangle(320, 414, 308, 404, 332, 404, kGold1);
+        hint = "UP DOWN  SCROLL      ESC  BACK";
     } else if (page == Page::Controls || page == Page::Capture) {
         canvas.centred("CONTROLS", 20, 46, kGold1, kGold2);
         const bool capturing = page == Page::Capture;

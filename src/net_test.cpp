@@ -319,8 +319,8 @@ int main(int argc, char** argv) {
         check(back >= 0, "ANNA comes back and both see each other again", back);
         // a crash (no goodbye) is noticed by the timeout
         a2.s->abandon();
-        const double timeout = run({&b}, 8, [&] { return !b.sees("ANNA"); });
-        check(timeout >= 0 && timeout < 6, "a player who just disappears is dropped after the timeout", timeout);
+        const double timeout = run({&b}, 14, [&] { return !b.sees("ANNA"); });
+        check(timeout >= 0 && timeout < 12, "a player who just disappears is dropped after the timeout", timeout);
     }
 
     std::printf("1b. room list on this PC / LAN (no server)\n");

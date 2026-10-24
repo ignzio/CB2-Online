@@ -153,7 +153,9 @@ void Platform::service() {
 
 void Platform::addHook(uint32_t pc, std::function<void(Platform&)> fn) {
     if (hookMark.empty()) hookMark.assign((cpu.ramMask + 1) >> 2, 0);
-    hooks[pc] = std::move(fn);
+    auto& slot = hooks[pc];
+    if (slot) { auto earlier = std::move(slot); slot = [earlier, later = std::move(fn)](Platform& pl) { earlier(pl); later(pl); }; }   // several users of one address all run
+    else slot = std::move(fn);
     hookMark[(pc & 0x1FFFFFFFu & cpu.ramMask) >> 2] = 1;
 }
 
@@ -180,7 +182,7 @@ uint32_t Platform::callFunction(uint32_t fn, std::initializer_list<uint32_t> reg
     };
     try {
         for (uint64_t guard = 0; cpu.pc != kSentinel; ++guard) {
-            if (guard > 20'000'000) throw std::runtime_error("guest function called from a hook did not return");
+            if (guard > callBudget) throw std::runtime_error("guest function called from a hook did not return");
             cpu.step();
         }
     } catch (...) {
@@ -188,6 +190,7 @@ uint32_t Platform::callFunction(uint32_t fn, std::initializer_list<uint32_t> reg
         throw;
     }
     const uint32_t result = cpu.r[2];
+    lastCallInstructions = cpu.instructions - startInstr;
     std::memcpy(cpu.r, r, sizeof r);
     cpu.hi = hi; cpu.lo = lo; cpu.pc = pc; cpu.nextPc = nextPc; cpu.pendReg = pendReg; cpu.pendVal = pendVal; cpu.cop0[12] = sr;
     cpu.instructions = startInstr;   // the call happens "between" two instructions: guest time does not move

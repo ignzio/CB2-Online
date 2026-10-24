@@ -20,7 +20,7 @@ namespace cb2net {
 namespace {
 
 constexpr double kSendInterval = 1.0 / 30.0;
-constexpr double kTimeout = 4.0;          // a player who sent nothing for this long has left
+constexpr double kTimeout = 10.0;         // a player who sent nothing for this long has left (a slow level load on their PC must not look like leaving: every other client would delete and re-create their Crash)
 constexpr double kRegisterInterval = 1.0;
 constexpr double kLanInterval = 1.0;
 constexpr double kRelayAfter = 3.0;       // no direct packet from a player for this long: go through the server

@@ -87,7 +87,7 @@ int keyFromName(const std::string& text) {
     return 0;
 }
 
-bool reservedKey(int k) { return k == GLFW_KEY_ESCAPE || k == GLFW_KEY_TAB || k == GLFW_KEY_F1 || k == GLFW_KEY_F2 || k == GLFW_KEY_F3 || k == GLFW_KEY_F5 || k == GLFW_KEY_F6 || k == GLFW_KEY_F9 || k == GLFW_KEY_F11 || k == GLFW_KEY_F12; }
+bool reservedKey(int k) { return k == GLFW_KEY_ESCAPE || k == GLFW_KEY_TAB || k == GLFW_KEY_F1 || k == GLFW_KEY_F2 || k == GLFW_KEY_F3 || k == GLFW_KEY_F4 || k == GLFW_KEY_F5 || k == GLFW_KEY_F6 || k == GLFW_KEY_F9 || k == GLFW_KEY_F11 || k == GLFW_KEY_F12; }
 
 void Keys::reset() { for (int i = 0; i < kBindingCount; ++i) { key[i] = kBindings[i].defaultKey; pad[i] = kBindings[i].defaultPad; } }
 

@@ -41,6 +41,16 @@ private:
     bool finish(const std::map<std::string, FileRef>& files, const std::string& volumeId);
     std::string bundlePath;
     mutable std::ifstream bundleStream;
+    // Reading host files sector by sector would open and close the file 2048 bytes at a time (very slow with a virus scanner or a slow disk:
+    // every area load of the game stutters). Instead the files stay open and are read in 64 KB chunks, of which the most recent are kept.
+    static constexpr uint32_t kChunkSectors = 32, kMaxChunks = 128;
+    struct Chunk { int node = -1; uint32_t index = 0; uint64_t stamp = 0; std::vector<uint8_t> data; };
+    mutable std::vector<Chunk> chunks;
+    mutable std::map<int, std::ifstream> handles;
+    mutable uint64_t stampCounter = 0;
+    mutable std::vector<std::pair<uint32_t, int>> extents;   // first sector of every file -> node index, sorted; built on first use
+    const Chunk* chunkFor(int nodeIndex, uint32_t chunkIndex) const;
+    int nodeForSector(uint32_t lba) const;
     std::vector<Node> nodes;
     std::map<uint32_t, std::vector<uint8_t>> meta;  // LBA -> 2048-byte synthetic sector
     uint32_t total = 0;

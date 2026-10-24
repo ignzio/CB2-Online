@@ -60,6 +60,8 @@ public:
     // Calls a guest function from inside a hook: up to four register arguments (a0..a3) and any number of stack arguments.
     // Interrupts are held off and every CPU register is restored afterwards. Returns v0.
     uint32_t callFunction(uint32_t fn, std::initializer_list<uint32_t> regArgs, std::initializer_list<uint32_t> stackArgs = {});
+    // Instructions a called function may run before it is given up on (it then throws and the registers are restored), and how many the last call used.
+    uint64_t callBudget = 20'000'000, lastCallInstructions = 0;
     uint32_t peek32(uint32_t a) { return cpu.rd32(a); }
     void poke32(uint32_t a, uint32_t v) { cpu.wr32(a, v); }
 

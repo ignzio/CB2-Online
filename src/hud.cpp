@@ -16,6 +16,12 @@ void Hud::notice(const std::string& text, Rgb colour, double now) {
 
 void Hud::draw(Canvas& canvas, const std::vector<Row>& rows, bool panel, double now) {
     notices.erase(std::remove_if(notices.begin(), notices.end(), [&](const Notice& n) { return n.until < now; }), notices.end());
+    if (!timerText.empty()) {
+        const float w = canvas.width(timerText, 24) + 20;
+        canvas.rect(kW - w - 8, 30, w, 30, rgb(0, 6, 12), 0.62f);
+        canvas.rect(kW - w - 8, 30, 3, 30, kGold1);
+        canvas.text(timerText, kW - w + 2, 33, 24, kWhite1, kWhite2);
+    }
     float y = 66;
     for (const Notice& n : notices) {
         const float fade = float(std::min(1.0, (n.until - now) / 0.6));   // fades out over the last 0.6 s
@@ -26,13 +32,15 @@ void Hud::draw(Canvas& canvas, const std::vector<Row>& rows, bool panel, double 
         y += 28;
     }
     if (panel && !rows.empty()) {
-        const float w = 196, rowH = 38, x = kW - w - 8, top = 64;
-        const float h = 30 + rowH * float(rows.size());
+        const float w = 206, x = kW - w - 8, top = timerText.empty() ? 64.0f : 68.0f;
+        float h = 30;
+        for (const Row& r : rows) h += r.finished.empty() ? 38.0f : 50.0f;
         canvas.rect(x, top, w, h, rgb(0, 6, 12), 0.6f);
         canvas.rect(x, top, w, 3, rgb(150, 92, 38), 0.95f);
         canvas.text("PLAYERS  " + std::to_string(rows.size()), x + 10, top + 7, 15, kGold1, kGold2);
         float ry = top + 28;
         for (const Row& r : rows) {
+            const float rowH = r.finished.empty() ? 38.0f : 50.0f;
             const Rgb c = rgb(uint8_t(r.rgb >> 16), uint8_t(r.rgb >> 8), uint8_t(r.rgb));
             canvas.rect(x + 8, ry + 5, 5, rowH - 12, c);
             std::string name = r.name.size() > 12 ? r.name.substr(0, 12) : r.name;
@@ -40,6 +48,8 @@ void Hud::draw(Canvas& canvas, const std::vector<Row>& rows, bool panel, double 
             canvas.text(name + (r.self ? "  (YOU)" : ""), x + 20, ry + 2, 15, kWhite1, kWhite2);
             canvas.text(r.where, x + 20, ry + 19, 12, r.inLevel ? kTeal : kDim);
             if (!r.time.empty()) canvas.text(r.time, x + w - 10 - canvas.width(r.time, 13), ry + 19, 13, r.inLevel ? kGreen : kDim);
+            if (!r.best.empty()) canvas.text("PB " + r.best, x + w - 10 - canvas.width("PB " + r.best, 11), ry + 3, 11, kGold1);
+            if (!r.finished.empty()) canvas.text("DONE " + r.finished, x + 20, ry + 34, 11, kGreen);
             ry += rowH;
         }
     }
