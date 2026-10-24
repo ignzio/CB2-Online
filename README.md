@@ -1,7 +1,4 @@
-# CB2-Online
-
-Crash Bandicoot 2 native PC port (C++) with online multiplayer inside the original game. Fan project, not affiliated
-with Sony or Activision.
+# Crash Bandicoot 2 native PC port (C++)
 
 Runs the original game on PC from your own game files: the original engine code and GOOL scripts execute unmodified on a
 cycle-approximate PlayStation platform layer (R3000 + exact GTE, GPU, SPU, CD-ROM, memory card, BIOS replacement),
@@ -71,6 +68,11 @@ disables this). `--native` runs the statically translated engine code (identical
 
 Settings can live in `cb2.cfg` (see `cb2.cfg.example`): game folder, mods, memory card, scale and RAM size. With it,
 `cb2_play.exe` needs no arguments; the game data stays in its own folder, separate from the engine.
+
+**Updates.** When the lobby opens, the game checks the GitHub Releases of this project for a newer version (one request, in
+the background). If there is one, the first row of the lobby becomes *UPDATE TO Vx.y.z*; choosing it downloads the new
+`Crash2.exe`, verifies its SHA-256, and restarts the game. Your game files, settings and saves are not touched.
+`update = off` in `cb2.cfg` disables the check. How releases are made: `docs/RELEASING.md`.
 
 ## Other tools
 

@@ -18,6 +18,7 @@
 #include "net.hpp"
 #include "stb_image_write.h"
 #include "ui.hpp"
+#include "updater.hpp"
 
 namespace cb2lobby {
 namespace {
@@ -62,7 +63,7 @@ std::string upper(std::string s) {
 bool nameChar(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '-' || c == '_' || c == '.'; }
 
 enum class Screen { Main, Rooms, Waiting };
-enum Item { kOffline, kLocal, kOnline, kName, kQuit, kItems };
+enum Item { kOffline, kLocal, kOnline, kName, kQuit, kUpdate, kItems };
 
 // One line of the room list: the "create" row, a room, or a dedicated server from the lobby directory.
 struct Row {
@@ -83,7 +84,7 @@ std::string upperKey(std::string s) {
 
 }  // namespace
 
-Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, const Script& script) {
+Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, const Script& script, cb2update::Updater* updater, const std::string& version) {
     Canvas canvas;
     if (!canvas.init()) return Outcome::Offline;
 
@@ -113,6 +114,23 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
     cb2net::DirectoryClient dirBrowse;
     const auto t0 = std::chrono::steady_clock::now();
     auto seconds = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
+
+    // The UPDATE row is only there while a newer release is known (or being downloaded); it comes first.
+    auto updateShown = [&] { return updater && (updater->state() == cb2update::State::Available || updater->state() == cb2update::State::Downloading); };
+    auto order = [&] {
+        std::vector<int> o;
+        if (updateShown()) o.push_back(kUpdate);
+        for (int i = 0; i < kUpdate; ++i) o.push_back(i);
+        return o;
+    };
+    auto moveSelection = [&](int dir) {
+        const std::vector<int> o = order();
+        size_t at = 0;
+        for (size_t i = 0; i < o.size(); ++i) if (o[i] == selected) at = i;
+        const int n = int(o.size());
+        selected = o[size_t((int(at) + dir + n) % n)];
+    };
+    bool updating = false;   // the player asked for the update
 
     auto openRooms = [&](bool local) {
         localMode = local;
@@ -245,11 +263,11 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                 if (ev.type == Event::Char) { if (nameChar(ev.c) && field.size() < size_t(cb2net::kNameLength - 1)) field += ev.c; }
                 else if (ev.type == Event::Back) { if (!field.empty()) field.pop_back(); }
                 else if (ev.type == Event::Enter || ev.type == Event::Esc) editing = -1;
-                else if (ev.type == Event::Up || ev.type == Event::Down) { editing = -1; selected = (selected + (ev.type == Event::Down ? 1 : kItems - 1)) % kItems; }
+                else if (ev.type == Event::Up || ev.type == Event::Down) { editing = -1; moveSelection(ev.type == Event::Down ? 1 : -1); }
                 continue;
             }
-            if (ev.type == Event::Up) { selected = (selected + kItems - 1) % kItems; message.clear(); }
-            else if (ev.type == Event::Down) { selected = (selected + 1) % kItems; message.clear(); }
+            if (ev.type == Event::Up) { moveSelection(-1); message.clear(); }
+            else if (ev.type == Event::Down) { moveSelection(1); message.clear(); }
             else if (ev.type == Event::Esc) return Outcome::Quit;
             else if (ev.type == Event::Enter) {
                 message.clear();
@@ -259,10 +277,22 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                 case kOnline: openRooms(false); break;
                 case kName: editing = selected; break;
                 case kQuit: return Outcome::Quit;
+                case kUpdate:
+                    if (updater && updater->state() == cb2update::State::Available) { updating = true; updater->startDownload(); }
+                    break;
                 }
             }
         }
         queue.clear();
+        if (updater && updating) {
+            if (updater->state() == cb2update::State::Ready) return Outcome::Update;
+            if (updater->state() == cb2update::State::Failed) {
+                updating = false;
+                message = "UPDATE FAILED: " + updater->error();
+                for (char& c : message) c = char(std::toupper(static_cast<unsigned char>(c)));
+            }
+        }
+        if (!updateShown() && selected == kUpdate) selected = kOnline;
         if (screen == Screen::Waiting) mp.tick();
         if (screen == Screen::Rooms) {
             roomSel = std::min(roomSel, std::max(0, rowCount - 1));
@@ -287,13 +317,21 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
 
         if (screen == Screen::Main) {
             title(canvas, "PLAY");
-            const char* labels[kItems] = {"PLAY OFFLINE", "PLAY LOCAL", "PLAY ONLINE", "NAME", "QUIT"};
-            const char* hints[kItems] = {"JUST THE GAME, LIKE ALWAYS", "FRIENDS ON THIS PC OR YOUR LOCAL NETWORK", "ROOMS AND SERVERS FROM EVERYWHERE - NOTHING TO TYPE", "SHOWN OVER YOUR CRASH", ""};
-            float y = 150;
-            for (int i = 0; i < kItems; ++i, y += 52) {
+            std::string updateLabel = "UPDATE";
+            if (updater && updateShown()) {
+                std::string v = updater->latest();
+                for (char& c : v) c = char(std::toupper(static_cast<unsigned char>(c)));
+                updateLabel = updater->state() == cb2update::State::Downloading ? "DOWNLOADING  " + std::to_string(updater->percent()) + "%" : "UPDATE TO  V" + v;
+            }
+            const char* labels[kItems] = {"PLAY OFFLINE", "PLAY LOCAL", "PLAY ONLINE", "NAME", "QUIT", ""};
+            const char* hints[kItems] = {"JUST THE GAME, LIKE ALWAYS", "FRIENDS ON THIS PC OR YOUR LOCAL NETWORK", "ROOMS AND SERVERS FROM EVERYWHERE - NOTHING TO TYPE", "SHOWN OVER YOUR CRASH", "", "A NEWER VERSION IS ON GITHUB - THE GAME RESTARTS WHEN IT IS DONE"};
+            const bool withUpdate = updateShown();
+            const float step = withUpdate ? 46.0f : 52.0f, rowH = withUpdate ? 38.0f : 42.0f, textSize = withUpdate ? 27.0f : 30.0f;
+            float y = withUpdate ? 116.0f : 150.0f;
+            for (const int i : order()) {
                 const bool sel = i == selected;
-                plank(canvas, 130, y, 380, 42, sel);
-                const std::string label = labels[i];
+                plank(canvas, 130, y, 380, rowH, sel);
+                const std::string label = i == kUpdate ? updateLabel : std::string(labels[i]);
                 if (i == kName) {
                     const bool edit = editing == i;
                     std::string shown = name + (edit && blink ? "_" : "");
@@ -301,9 +339,11 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                     const float w = canvas.width(shown, 24);
                     canvas.text(shown, 496 - w, y + 8, 24, edit ? kGreen : kWhite1);
                 } else {
-                    canvas.text(label, 320 - canvas.width(label, 30) * 0.5f, y + 5, 30, sel ? kGold1 : kWhite1, sel ? kGold2 : kWhite2);
+                    canvas.text(label, 320 - canvas.width(label, textSize) * 0.5f, y + 4, textSize, i == kUpdate ? kGreen : (sel ? kGold1 : kWhite1), sel ? kGold2 : kWhite2);
                 }
+                y += step;
             }
+            if (!version.empty()) canvas.text("V" + version, 626 - canvas.width("V" + version, 14), 34, 14, kDim);
             if (editing < 0 && hints[selected][0]) canvas.centred(hints[selected], 418, 16, kDim);
             if (!message.empty()) canvas.centred(message, 394, 22, kRed);
             canvas.centred(editing >= 0 ? "TYPE.  BACKSPACE DELETES.  ENTER WHEN DONE" : "UP DOWN  SELECT      ENTER  CHOOSE      ESC  QUIT", 446, 18, kDim);

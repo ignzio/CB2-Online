@@ -14,6 +14,7 @@
 //   rendezvous = my.server.com:7777    rendezvous server (cb2_server) that introduces players to each other; empty = this PC / LAN only
 //   directory = https://cb2-lobby.example.workers.dev   lobby service (docs/LOBBY_PROTOCOL.md): lists open servers and rooms; built in, this only overrides it
 //   lobby   = off                      do not show the online lobby before the game
+//   update  = off                      do not look for a newer release on GitHub when the lobby opens
 // Command-line options override the file. The file is searched in the current folder, then next to the executable.
 #include <map>
 #include <string>
@@ -33,6 +34,7 @@ struct Config {
     int volume = 100, filter = 2;
     bool nameTags = true;
     std::map<std::string, std::string> keyNames;
+    bool update = true;        // look for a newer release (see updater.hpp); update = off disables it
     bool lobby = true;         // show the online lobby before the game starts (lobby = off disables it)
 #ifndef CB2_DEFAULT_DIRECTORY
 #define CB2_DEFAULT_DIRECTORY ""

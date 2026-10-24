@@ -41,6 +41,7 @@ bool Config::load(const std::string& exeDir) {
             else if (k == "room") room = v;
             else if (k == "rendezvous") rendezvous = v;
             else if (k == "directory") directory = v;
+            else if (k == "update") update = !(v == "off" || v == "0" || v == "no" || v == "false");
             else if (k == "lobby") lobby = !(v == "off" || v == "0" || v == "no" || v == "false");
         }
         loadedFrom = p.string();

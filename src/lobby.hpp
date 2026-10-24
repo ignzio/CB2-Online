@@ -8,6 +8,7 @@
 struct GLFWwindow;
 
 namespace cb2mp { class Multiplayer; struct Options; }
+namespace cb2update { class Updater; }
 
 namespace cb2lobby {
 
@@ -15,6 +16,7 @@ enum class Outcome {
     Offline,   // play alone
     Online,    // the Multiplayer object has been started (hosting or joined); the caller installs its hooks
     Quit,
+    Update,    // the new version has been downloaded: the caller installs it and restarts
 };
 
 // Scripted input for automated tests (--lobby-script "down,enter,wait:60,shot"): up, down, enter, esc, back (backspace),
@@ -25,6 +27,7 @@ struct Script {
 };
 
 // `options` supplies the starting name, server and port; the name and server typed here are written back into it.
-Outcome run(GLFWwindow* window, cb2mp::Multiplayer& mp, cb2mp::Options& options, const Script& script);
+// `updater` (may be null) is checking for a newer release; when it finds one the main screen gets an UPDATE row. `version` is shown in the corner.
+Outcome run(GLFWwindow* window, cb2mp::Multiplayer& mp, cb2mp::Options& options, const Script& script, cb2update::Updater* updater, const std::string& version);
 
 }  // namespace cb2lobby

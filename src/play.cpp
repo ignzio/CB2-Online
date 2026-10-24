@@ -25,11 +25,19 @@
 #include "multiplayer.hpp"
 #include "pausemenu.hpp"
 #include "relaunch.hpp"
+#include "updater.hpp"
 #include "psx.hpp"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
 namespace {
+
+#ifndef CB2_VERSION
+#define CB2_VERSION "0.0.0"
+#endif
+#ifndef CB2_UPDATE_REPO
+#define CB2_UPDATE_REPO ""
+#endif
 
 cb2menu::PauseMenu* gMenu = nullptr;   // the key callback needs it
 
@@ -291,8 +299,26 @@ int main(int argc, char** argv) {
     // The lobby comes first when nothing on the command line already decided between playing alone and online.
     const bool commandLineOnline = online.online || online.fake;
     if (cfg.lobby && !noLobby && !nativeCode && !interpOnly && !commandLineOnline && (forceLobby || (!captureFrame && !hidden))) {
-        const cb2lobby::Outcome outcome = cb2lobby::run(win, mp, online, lobbyScript);
+        // Look for a newer release while the lobby is open. CB2_FAKE_VERSION pretends to be another version (to try the updater).
+        std::string version = CB2_VERSION;
+        if (const char* fake = std::getenv("CB2_FAKE_VERSION")) version = fake;
+        cb2update::cleanLeftovers();
+        cb2update::Updater updater;
+        const bool checkUpdates = cfg.update && !std::string(CB2_UPDATE_REPO).empty();
+        if (checkUpdates) updater.startCheck(CB2_UPDATE_REPO, version);
+        const cb2lobby::Outcome outcome = cb2lobby::run(win, mp, online, lobbyScript, checkUpdates ? &updater : nullptr, version);
         if (outcome == cb2lobby::Outcome::Quit) { glfwTerminate(); return 0; }
+        if (outcome == cb2lobby::Outcome::Update) {
+            std::string err;
+            if (updater.install(err)) {
+                std::printf("updated to %s, restarting\n", updater.latest().c_str());
+                glfwTerminate();
+                cb2::relaunchToLobby(argc, argv);
+                return 0;
+            }
+            std::fprintf(stderr, "update: %s\n", err.c_str());
+            psx::showError("The update could not be installed: " + err);
+        }
         if (outcome == cb2lobby::Outcome::Online) {
             onlineStarted = true;
             mp.install();
