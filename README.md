@@ -1,4 +1,7 @@
-# Crash Bandicoot 2 native PC port (C++)
+# CB2-Online
+
+Crash Bandicoot 2 native PC port (C++) with online multiplayer inside the original game. Fan project, not affiliated
+with Sony or Activision.
 
 Runs the original game on PC from your own game files: the original engine code and GOOL scripts execute unmodified on a
 cycle-approximate PlayStation platform layer (R3000 + exact GTE, GPU, SPU, CD-ROM, memory card, BIOS replacement),
