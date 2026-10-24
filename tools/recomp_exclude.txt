@@ -1,0 +1,3 @@
+# Functions that must stay on the interpreter because translated execution was found (by cb2_nativecheck) to differ
+# from it. One hex address per line. Addresses only; regenerate with tools/recomp.py after editing.
+8003a014   # GOOL interpreter loop: dispatch through jump tables with loads in delay slots

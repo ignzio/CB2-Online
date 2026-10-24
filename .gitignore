@@ -1,0 +1,26 @@
+build/
+# private: the maintainer's lobby service and the addresses baked into the executable
+worker/
+local/
+# game data, built game folders and saves must never be committed
+dist/
+*.mcr
+*.rar
+*.zip
+*.bin
+*.iso
+*.cue
+S0/
+S1/
+S2/
+S3/
+SCUS_*
+SYSTEM.CNF
+node_modules/
+*.png
+analysis/
+mods/
+dist/Crash2/data/
+dist/**/*.mcr
+
+worker/

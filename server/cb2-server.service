@@ -1,0 +1,19 @@
+[Unit]
+Description=Crash Bandicoot 2 online rendezvous server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/cb2_server @PORT@ --quiet
+User=cb2
+Restart=always
+RestartSec=2
+# the server needs nothing but a UDP socket
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+
+[Install]
+WantedBy=multi-user.target

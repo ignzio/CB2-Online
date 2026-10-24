@@ -1,0 +1,28 @@
+#include <winver.h>
+
+// ID 1 is the icon Explorer shows for the .exe; GLFW_ICON is the name GLFW looks up for the window and taskbar icon.
+1 ICON "icon.ico"
+GLFW_ICON ICON "icon.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "Crash Bandicoot 2 native PC port"
+            VALUE "ProductName", "Crash Bandicoot 2 (native port)"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "Crash2"
+            VALUE "OriginalFilename", "Crash2.exe"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

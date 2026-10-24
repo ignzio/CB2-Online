@@ -1,0 +1,12 @@
+# Copy to cb2.cfg (next to cb2_play.exe or in the working folder). Command-line options override these.
+# Folder holding your own game files (S0..S3 and SCUS_941.54). Nothing from the game is shipped with the engine.
+game = ..
+# Mod overlays, applied in order (repeat the line for more)
+# mod = mods/my_mod
+card = memcard0.mcr
+# OpenGL internal resolution multiplier (1 = original picture, 1..8)
+scale = 4
+# Engine heap size, 2..16 MB
+ram_mb = 2
+# cb2_engine only: hex level id to load (omit for the built-in test arena)
+# level = 0C
