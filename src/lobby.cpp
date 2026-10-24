@@ -326,8 +326,8 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
             const char* labels[kItems] = {"PLAY OFFLINE", "PLAY LOCAL", "PLAY ONLINE", "NAME", "QUIT", ""};
             const char* hints[kItems] = {"JUST THE GAME, LIKE ALWAYS", "FRIENDS ON THIS PC OR YOUR LOCAL NETWORK", "ROOMS AND SERVERS FROM EVERYWHERE - NOTHING TO TYPE", "SHOWN OVER YOUR CRASH", "", "A NEWER VERSION IS ON GITHUB - THE GAME RESTARTS WHEN IT IS DONE"};
             const bool withUpdate = updateShown();
-            const float step = withUpdate ? 46.0f : 52.0f, rowH = withUpdate ? 38.0f : 42.0f, textSize = withUpdate ? 27.0f : 30.0f;
-            float y = withUpdate ? 116.0f : 150.0f;
+            const float step = withUpdate ? 44.0f : 52.0f, rowH = withUpdate ? 36.0f : 42.0f, textSize = withUpdate ? 25.0f : 30.0f;
+            float y = withUpdate ? 134.0f : 150.0f;
             for (const int i : order()) {
                 const bool sel = i == selected;
                 plank(canvas, 130, y, 380, rowH, sel);

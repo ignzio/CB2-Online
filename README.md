@@ -6,6 +6,15 @@ with an OpenGL window, audio and keyboard/gamepad input. Game data is read at ru
 project; point it at your own files. Includes a level viewer, an NSF/NSD read/write library for modding, and a verified
 GOOL VM for the decompiler work. Architecture: `docs/PLATFORM.md`, `docs/ARCHITECTURE.md`.
 
+## Install (from a release)
+
+1. Download `CB2-Online-v<version>.zip` from the [Releases](../../releases) page and unzip it.
+2. **Add your own game files.** The release does not contain the game (it is copyrighted, so it can't be shared here). Copy
+   the contents of your own Crash Bandicoot 2 (NTSC-U, `SCUS_941.54`) disc into the `data` folder: `SCUS_941.54`,
+   `SYSTEM.CNF` and the `S0`, `S1`, `S2`, `S3` folders. If you only have a disc image, open the `.bin`/`.iso` with 7-Zip or
+   a disc tool and extract those files.
+3. Run `Play.bat` (or `Crash2.exe`). The game keeps itself up to date from then on (see Updates below).
+
 ## Build (Windows, Visual Studio 2022 + CMake)
 
 ```

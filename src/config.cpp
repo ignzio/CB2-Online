@@ -99,8 +99,10 @@ void Config::resolvePaths(const std::string& exeDir) {
 
 std::string Config::validate() const {
     namespace fs = std::filesystem;
-    if (game.empty()) return "no game folder: pass it on the command line or set `game = <folder>` in cb2.cfg";
-    if (!fs::exists(fs::path(game) / "SCUS_941.54")) return "SCUS_941.54 not found in " + game;
+    static const char* kHelp = "\n\nThis program does not include the game. Copy the files of your own Crash Bandicoot 2 disc "
+                               "(SCUS_941.54, SYSTEM.CNF and the S0, S1, S2, S3 folders) into the 'data' folder next to Crash2.exe, then start it again.";
+    if (game.empty()) return std::string("Game files not found.") + kHelp;
+    if (!fs::exists(fs::path(game) / "SCUS_941.54")) return "SCUS_941.54 not found in " + game + kHelp;
     return {};
 }
 
