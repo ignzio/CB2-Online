@@ -43,6 +43,9 @@ public:
     void tick();                                               // networking; call every vertical blank
     std::vector<cb2net::PlayerState> others();                 // remote players (or the test ghost)
     int puppetCount() const { return int(puppets.size()); }
+    uint32_t levelId() const { return level; }
+    // The console was rewound by a loaded save state: forget everything tracked about the game's objects (they are all different now).
+    void stateLoaded(uint32_t levelNow);
     bool showTags = true;                                      // the pause menu's "Name tags"
 
     // Addresses in the executable

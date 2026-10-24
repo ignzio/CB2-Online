@@ -7,7 +7,10 @@
 
 namespace psx {
 
+struct StateAccess;
+
 class Spu {
+    friend struct StateAccess;
 public:
     std::vector<uint8_t> ram = std::vector<uint8_t>(512 * 1024, 0);
     std::function<void(int16_t, int16_t)> sink;  // receives one stereo frame at 44.1 kHz

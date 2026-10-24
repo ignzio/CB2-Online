@@ -126,7 +126,14 @@ bool PauseMenu::script(const std::string& tok) {
 }
 
 void PauseMenu::draw(double t) {
-    if (page == Page::Closed) return;
+    if (page == Page::Closed) {
+        if (toastText.empty() || t > toastUntil) { toastText.clear(); return; }
+        const float w = canvas.width(toastText, 18);
+        canvas.rect(14, 30, w + 16, 30, rgb(0, 6, 12), 0.7f);
+        canvas.text(toastText, 22, 34, 18, kWhite1, kWhite2);
+        canvas.flush();
+        return;
+    }
     now = t;
     if (!message.empty() && now > messageUntil) message.clear();
     const bool blink = int(t * 2.0) % 2 == 0;

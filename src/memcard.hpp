@@ -7,7 +7,10 @@
 
 namespace psx {
 
+struct StateAccess;
+
 class MemCard {
+    friend struct StateAccess;
 public:
     static constexpr uint32_t kSize = 128 * 1024, kFrame = 128, kBlock = 8192;
 

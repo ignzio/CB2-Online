@@ -65,6 +65,13 @@ more memory than the 2 MiB of the retail console. See `docs/MODDING.md` and `doc
 Player keys: `Esc` opens the in-game menu (see below), `F1` cycles the display filter (nearest / bilinear / sharp
 bilinear), `F11` fullscreen, hold `Tab` to fast-forward, `F2` toggles the OpenGL renderer.
 
+**Save states.** `F5` saves the whole game (all of the emulated console) into the current slot, `F9` loads it, `F6` switches
+between slots 1-4. Files: `states\slotN.cb2state` next to `Crash2.exe`. Useful for practice, for developing, and for reproducing
+bugs without replaying the cutscenes. For tests: `--load-state file` starts from a state, `--save-state-at FRAME:file` plays a
+scripted run and saves one. States are not portable between versions that change the console emulation, they do not touch your
+memory card saves, and they only work with the normal (interpreter) engine. `cb2_statetest` checks that a loaded state replays
+identically.
+
 **In-game menu (`Esc`).** Pauses the game and offers Resume, Controls, Volume, Picture (the `F1` filter), Fullscreen,
 Name tags (online only), Main menu and Quit. *Controls* rebinds all 14 PS1 buttons: pick a row, press Enter, press the new
 key (a key already in use swaps with the one you pick; `Del` clears a binding; `Esc`, `Tab`, `F1`, `F2`, `F11` and `F12`

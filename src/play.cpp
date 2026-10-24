@@ -27,6 +27,7 @@
 #include "relaunch.hpp"
 #include "updater.hpp"
 #include "discimport.hpp"
+#include "savestate.hpp"
 #include "psx.hpp"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -122,6 +123,8 @@ int main(int argc, char** argv) {
                                                        : std::filesystem::path(psx::selfPath()).parent_path().string();
     cfg.load(exeDir);
     int first = 1;
+    std::string loadStatePath, saveStatePath;   // --load-state file, --save-state-at FRAME:file
+    uint64_t saveStateFrame = 0;
     std::string importImage;                  // a disc image (.cue/.bin/.iso) dropped on the exe or given with --import: its files are copied to <exe folder>\data
     if (argc > 1 && std::strncmp(argv[1], "--", 2) != 0) {
         std::error_code isFile;
@@ -155,6 +158,12 @@ int main(int argc, char** argv) {
         const bool more = i + 1 < argc;
         if (!std::strcmp(argv[i], "--game") && more) cfg.game = argv[++i];
         else if (!std::strcmp(argv[i], "--import") && more) importImage = argv[++i];
+        else if (!std::strcmp(argv[i], "--load-state") && more) loadStatePath = argv[++i];
+        else if (!std::strcmp(argv[i], "--save-state-at") && more) {   // FRAME:file - save a state at that frame and quit (makes a state from a scripted run)
+            const std::string s = argv[++i];
+            const size_t colon = s.find(':');
+            if (colon != std::string::npos) { saveStateFrame = std::strtoull(s.c_str(), nullptr, 10); saveStatePath = s.substr(colon + 1); }
+        }
         else if (!std::strcmp(argv[i], "--native")) nativeCode = true;
         else if (!std::strcmp(argv[i], "--mod") && more) mods.push_back(argv[++i]);
         else if (!std::strcmp(argv[i], "--card") && more) cardPath = argv[++i];
@@ -387,7 +396,7 @@ int main(int argc, char** argv) {
     else std::fprintf(stderr, "no audio device; continuing silently\n");
     std::vector<uint32_t> rgba(1024 * 512, 0xFF000000u);
     int shot = 0;
-    bool f1Down = false, f2Down = false, f11Down = false;
+    bool f1Down = false, f2Down = false, f11Down = false, f5Down = false, f6Down = false, f9Down = false;
     uint64_t lastTitle = 0;
     auto toggleFullscreen = [&] {
         if (glfwGetWindowMonitor(win)) glfwSetWindowMonitor(win, nullptr, 100, 100, 960, 720, 0);
@@ -437,6 +446,39 @@ int main(int argc, char** argv) {
     double t0 = glfwGetTime();
     uint64_t base = p.frames;
     bool quitRequested = false;
+    // Save states (F5 save, F9 load, F6 next slot): practice and test runs start from any moment of the game. Files: <exe folder>\states\slotN.cb2state
+    int stateSlot = 1;
+    auto slotPath = [&](int n) { return (std::filesystem::path(exeDir) / "states" / ("slot" + std::to_string(n) + ".cb2state")).string(); };
+    auto doSave = [&](const std::string& path) {
+        std::vector<uint8_t> extra(4);
+        const uint32_t lvl = mp.levelId();
+        std::memcpy(extra.data(), &lvl, 4);
+        std::string err;
+        const bool ok = psx::saveState(p, path, extra, err);
+        if (!ok) std::fprintf(stderr, "save state: %s\n", err.c_str());
+        return std::make_pair(ok, err);
+    };
+    auto doLoad = [&](const std::string& path) {
+        std::vector<uint8_t> extra;
+        std::string err;
+        const bool ok = psx::loadState(p, path, extra, err);
+        if (ok) {
+            uint32_t lvl = 0xFF;
+            if (extra.size() >= 4) std::memcpy(&lvl, extra.data(), 4);
+            mp.stateLoaded(lvl);
+            t0 = glfwGetTime();
+            base = p.frames;
+            suppressPad = true;
+        } else {
+            std::fprintf(stderr, "load state: %s\n", err.c_str());
+        }
+        return std::make_pair(ok, err);
+    };
+    if (!loadStatePath.empty()) {
+        const auto r = doLoad(loadStatePath);
+        if (!r.first) { psx::showError("Cannot load the saved state: " + r.second); glfwTerminate(); return 2; }
+        std::printf("loaded state %s (frame %llu)\n", loadStatePath.c_str(), (unsigned long long)p.frames);
+    }
     while (!glfwWindowShouldClose(win) && !quitRequested) {
         // scripted menu input (tests): open, wait:N (N x 16 ms), shot:file.png, exit, or anything the menu understands
         if (!menuScript.empty() && p.frames >= menuAt && menuPos < menuScript.size() && glfwGetTime() >= menuWaitUntil) {
@@ -494,6 +536,11 @@ int main(int argc, char** argv) {
         }
         if (!err.empty()) { std::fprintf(stderr, "guest stopped: %s\n", err.c_str()); break; }
 
+        if (saveStateFrame && p.frames >= saveStateFrame) {
+            const auto r = doSave(saveStatePath);
+            std::printf(r.first ? "state saved at frame %llu to %s\n" : "state NOT saved at frame %llu to %s\n", (unsigned long long)p.frames, saveStatePath.c_str());
+            break;
+        }
         mp.showTags = settings.nameTags;
         if (captureAfterPuppet && mp.puppetCount() > 0 && !puppetSince) puppetSince = p.frames;
         const bool captureNow = captureFrame && p.frames >= captureFrame && (!captureAfterPuppet || (puppetSince && p.frames >= puppetSince + captureAfterPuppet));
@@ -552,9 +599,9 @@ int main(int argc, char** argv) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mag);
         glBindVertexArray(vao);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        if (menu.isOpen()) {
-            menu.draw(glfwGetTime());
-            if (!menuShotPath.empty()) { saveWindow(menuShotPath, fw, fh); std::printf("menu picture saved to %s\n", menuShotPath.c_str()); menuShotPath.clear(); }
+        menu.draw(glfwGetTime());
+        {
+            if (menu.isOpen() && !menuShotPath.empty()) { saveWindow(menuShotPath, fw, fh); std::printf("menu picture saved to %s\n", menuShotPath.c_str()); menuShotPath.clear(); }
         }
         const cb2menu::Result menuResult = menu.takeResult();
         if (menuResult == cb2menu::Result::Quit) quitRequested = true;
@@ -579,6 +626,17 @@ int main(int argc, char** argv) {
         if (edge(GLFW_KEY_F1, f1Down)) { settings.filter = (settings.filter + 1) % 3; saveSettings(); }
         if (edge(GLFW_KEY_F2, f2Down) && useHires) { showHires = !showHires; p.gpu.rasterize = !showHires; }
         if (edge(GLFW_KEY_F11, f11Down)) toggleFullscreen();
+        if (!menu.isOpen()) {
+            if (edge(GLFW_KEY_F6, f6Down)) { stateSlot = stateSlot % 4 + 1; menu.toast("STATE SLOT " + std::to_string(stateSlot), glfwGetTime()); }
+            if (edge(GLFW_KEY_F5, f5Down)) {
+                const auto r = doSave(slotPath(stateSlot));
+                menu.toast(r.first ? "STATE " + std::to_string(stateSlot) + " SAVED" : "CANNOT SAVE: " + r.second, glfwGetTime());
+            }
+            if (edge(GLFW_KEY_F9, f9Down)) {
+                const auto r = doLoad(slotPath(stateSlot));
+                menu.toast(r.first ? "STATE " + std::to_string(stateSlot) + " LOADED" : "CANNOT LOAD: " + r.second, glfwGetTime());
+            }
+        }
         if (glfwGetKey(win, GLFW_KEY_F12) == GLFW_PRESS) {
             char name[64];
             std::snprintf(name, sizeof name, "cb2_shot_%03d.png", shot++);

@@ -23,7 +23,10 @@
 
 namespace psx {
 
+struct StateAccess;
+
 class Platform {
+    friend struct StateAccess;
 public:
     Platform();
     ~Platform();

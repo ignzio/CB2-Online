@@ -8,6 +8,8 @@
 
 namespace psx {
 
+struct StateAccess;   // save states (savestate.cpp)
+
 // One drawing operation as the game issued it, for renderers that replay the frame on the host GPU at a higher
 // resolution. The software rasteriser still maintains the exact VRAM (textures and render-to-texture effects read it).
 struct GpuCmd {
@@ -25,6 +27,7 @@ struct GpuCmd {
 };
 
 class Gpu {
+    friend struct StateAccess;
 public:
     static constexpr int kW = 1024, kH = 512;
     std::vector<uint16_t> vram = std::vector<uint16_t>(kW * kH, 0);

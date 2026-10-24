@@ -2,6 +2,7 @@
 // The in-game menu (Esc): volume, display options, keyboard bindings, back to the main menu, quit. It is drawn over the frozen game picture
 // with the same look as the online lobby (ui.hpp). The game is paused while it is open; settings are saved by the caller (changed()).
 #include <functional>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -39,7 +40,13 @@ public:
     bool script(const std::string& token);
     Result takeResult() { const Result r = result; result = Result::None; return r; }
     bool takeChanged() { const bool c = changed; changed = false; return c; }
-    void draw(double seconds);
+    void draw(double seconds);   // also call it while the menu is closed: it then shows the toast, if any
+    // A short message over the game ("state saved"), shown for two seconds.
+    void toast(const std::string& text, double seconds) {
+        toastText = text;
+        for (char& c : toastText) c = char(std::toupper(static_cast<unsigned char>(c)));   // the font has capitals only
+        toastUntil = seconds + 2.0;
+    }
 
 private:
     enum class Page { Closed, Main, Controls, Capture, ConfirmMenu, ConfirmQuit };
@@ -54,6 +61,8 @@ private:
     Result result = Result::None;
     std::string message;
     double messageUntil = 0, now = 0;
+    std::string toastText;
+    double toastUntil = 0;
 
     std::vector<Item> items() const;
     void adjust(Item item, int direction);

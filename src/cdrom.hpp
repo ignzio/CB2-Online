@@ -9,7 +9,10 @@
 
 namespace psx {
 
+struct StateAccess;
+
 class CdRom {
+    friend struct StateAccess;
 public:
     VirtualDisc* disc = nullptr;
     bool irqLine = false;          // asserted while (flags & enable) != 0; the platform mirrors it into I_STAT bit 2

@@ -90,6 +90,20 @@ void Multiplayer::install() {
     p.addHook(kOpenLevel, [this](psx::Platform& pl) { if (pl.cpu.r[4] == 0) onLevel(pl.cpu.r[5]); });
 }
 
+void Multiplayer::stateLoaded(uint32_t levelNow) {
+    level = levelNow & 0xFF;
+    player = playerSeen = 0;
+    playerSteps = lastPlayerStep = 0;
+    managedFrame = ~0ull;
+    puppets.clear();
+    zombies.clear();
+    steppingPuppet = nullptr;
+    stepping = 0;
+    samples.clear();
+    p.cpu.gteSamples = nullptr;
+    if (net.active()) announce(level);
+}
+
 std::string Multiplayer::status() const {
     if (!active()) return "offline";
     std::string s = opt.fake ? std::string("test ghost") : net.status();
