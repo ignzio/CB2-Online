@@ -3,6 +3,7 @@
 // sector reads from a VirtualDisc at double speed, and the data FIFO read through register 1802 or DMA 3.
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <vector>
 
 #include "disc.hpp"
@@ -17,6 +18,7 @@ public:
     VirtualDisc* disc = nullptr;
     bool irqLine = false;          // asserted while (flags & enable) != 0; the platform mirrors it into I_STAT bit 2
     bool trace = false;                // print every register access and interrupt
+    std::function<void(uint32_t)> onSectorRead;   // called with the LBA of every sector the controller reads (tools)
     uint64_t commandsSeen[0x20] = {};
 
     uint8_t read(uint32_t reg);

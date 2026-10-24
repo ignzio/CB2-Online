@@ -87,7 +87,10 @@ void Multiplayer::install() {
         pl.cpu.pc = pl.cpu.r[31];
         pl.cpu.nextPc = pl.cpu.pc + 4;
     });
-    p.addHook(kOpenLevel, [this](psx::Platform& pl) { if (pl.cpu.r[4] == 0) onLevel(pl.cpu.r[5]); });
+    p.addHook(kOpenLevel, [this](psx::Platform& pl) {
+        if (debug()) std::printf("[mp] frame %llu: open-level call a0=%08x a1=%08x a2=%08x a3=%08x ra=%08x\n", (unsigned long long)pl.frames, pl.cpu.r[4], pl.cpu.r[5], pl.cpu.r[6], pl.cpu.r[7], pl.cpu.r[31]);
+        if (pl.cpu.r[4] == 0) onLevel(pl.cpu.r[5]);
+    });
 }
 
 void Multiplayer::stateLoaded(uint32_t levelNow) {
@@ -145,7 +148,11 @@ bool Multiplayer::isOurs(uint32_t a) {
     return isObject(a) && p.peek32(a + F(kMarkerField)) == kMarker && p.peek32(a + 0x44) == kPuppetParent;
 }
 
-bool Multiplayer::isPlayer(uint32_t a) { return a && isObject(a) && p.peek32(a + F(kPlayer)) == a; }
+// The game's current player object. Normally its "player" field points at itself, but after a death / respawn or a teleport the engine can
+// leave that field pointing at another object while the object is still the live Crash, so the global that names the current player counts too.
+bool Multiplayer::isPlayer(uint32_t a) {
+    return a && isObject(a) && (p.peek32(a + F(kPlayer)) == a || a == p.peek32(kPlayerGlobal));
+}
 
 bool Multiplayer::isPuppet(uint32_t a) {
     return a && player && a != player && isObject(a) && p.peek32(a + F(kMarkerField)) == kMarker && p.peek32(a + F(29)) == kPuppetSubtype &&
@@ -317,9 +324,9 @@ void Multiplayer::buildTags() {
 }
 
 void Multiplayer::publish() {
-    if (!isPlayer(player) || level == 0xFF || !recordValid(player)) return;
+    if (!isPlayer(player) || level == 0xFF || !recordValid(player)) { if (debug() && p.frames % 30 == 0) std::printf("[mp] frame %llu: publish skipped (player/level/record)\n", (unsigned long long)p.frames); return; }
     const uint32_t pose = poseType(player);
-    if (pose != 1 && pose != 2 && pose != 4 && pose != 5) return;   // not a pose the game can draw (cutscenes)
+    if (pose != 1 && pose != 2 && pose != 4 && pose != 5) { if (debug() && p.frames % 30 == 0) std::printf("[mp] frame %llu: publish skipped (pose type %u)\n", (unsigned long long)p.frames, pose); return; }   // not a pose the game can draw (cutscenes)
     cb2net::PlayerState s;
     s.level = uint8_t(level);
     std::strncpy(s.name, playerName.c_str(), cb2net::kNameLength - 1);
@@ -374,7 +381,20 @@ void Multiplayer::destroyPuppet(Puppet& pu) {
 // Once per frame, at the first object update: make the set of puppets match the players who are here.
 void Multiplayer::manage() {
     if (!findPlayer() || level == 0xFF || level == 0x3C) {
-        if (debug() && p.frames % 300 == 0) std::printf("[mp] frame %llu: no player yet (level %02X)\n", (unsigned long long)p.frames, level);
+        // With no Crash to work from, still forget puppets the engine has thrown away (a level restart frees every object).
+        for (auto it = puppets.begin(); it != puppets.end();) {
+            if (!isOurs(it->second.obj)) it = puppets.erase(it); else ++it;
+        }
+        if (debug() && p.frames % 60 == 0) {
+            const uint32_t g = p.peek32(kPlayerGlobal);
+            auto dump = [&](const char* tag, uint32_t a) {
+                std::printf("[mp]   %s %08x: first %08x type %08x record %08x entry %08x parent %08x pos %d,%d,%d fgrp %08x(type %u) f5 %08x f29 %08x f63 %08x\n", tag, a, p.peek32(a), p.peek32(a + 4), p.peek32(a + 8), p.peek32(a + 0xC),
+                            p.peek32(a + 0x44), int(p.peek32(a + F(kX))), int(p.peek32(a + F(kY))), int(p.peek32(a + F(kZ))), p.peek32(a + F(kFrameGroup)), poseType(a), p.peek32(a + F(5)), p.peek32(a + F(29)), p.peek32(a + F(63)));
+            };
+            if (g && p.frames % 60 == 0) { dump("global", g); dump("its field5", p.peek32(g + F(kPlayer))); }
+            std::printf("[mp] frame %llu: no player yet (level %02X): global %08x isObject %d first %08x self %08x type %08x field5 %08x\n", (unsigned long long)p.frames, level, g, int(isObject(g)),
+                        p.peek32(g), p.peek32(g + F(kSelf)), p.peek32(g + 4), p.peek32(g + F(kPlayer)));
+        }
         return;
     }
     for (size_t i = 0; i < zombies.size();) {
@@ -387,7 +407,17 @@ void Multiplayer::manage() {
     // world is running (it may still point at the previous level's Crash), so wait until the game has been seen updating this Crash for a
     // while, and only create objects while it still does.
     const bool running = lastPlayerStep + 3 >= p.frames;
-    const bool settled = running && playerSteps >= 40;
+    static const uint64_t settleSteps = std::getenv("CB2_MPSETTLE") ? std::strtoull(std::getenv("CB2_MPSETTLE"), nullptr, 10) : 40;   // tests: spawn sooner
+    const bool settled = running && playerSteps >= settleSteps;
+    if (debug() && p.frames % 30 == 0) {
+        std::printf("[mp] frame %llu: global %08x player %08x (isPlayer %d, pose type %u, record ok %d, field5 %08x) level %02X steps %llu running %d | puppets:", (unsigned long long)p.frames,
+                    p.peek32(kPlayerGlobal), player, int(isPlayer(player)), poseType(player), int(recordValid(player)), player ? p.peek32(player + F(kPlayer)) : 0, level,
+                    (unsigned long long)playerSteps, int(running));
+        for (const auto& [pid, pu] : puppets)
+            std::printf(" [%u obj %08x isPuppet %d lastStep %llu pos %d,%d,%d]", pid, pu.obj, int(isPuppet(pu.obj)), (unsigned long long)pu.lastStep,
+                        int(p.peek32(pu.obj + F(kX))), int(p.peek32(pu.obj + F(kY))), int(p.peek32(pu.obj + F(kZ))));
+        std::printf("\n");
+    }
     if (debug() && p.frames % 300 == 0) {
         size_t same = 0;
         for (const auto& o : others()) same += o.level == level;

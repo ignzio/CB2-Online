@@ -125,6 +125,7 @@ int main(int argc, char** argv) {
     int first = 1;
     std::string loadStatePath, saveStatePath;   // --load-state file, --save-state-at FRAME:file
     uint64_t saveStateFrame = 0;
+    bool relativeFrames = false;
     std::string importImage;                  // a disc image (.cue/.bin/.iso) dropped on the exe or given with --import: its files are copied to <exe folder>\data
     if (argc > 1 && std::strncmp(argv[1], "--", 2) != 0) {
         std::error_code isFile;
@@ -159,6 +160,7 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--game") && more) cfg.game = argv[++i];
         else if (!std::strcmp(argv[i], "--import") && more) importImage = argv[++i];
         else if (!std::strcmp(argv[i], "--load-state") && more) loadStatePath = argv[++i];
+        else if (!std::strcmp(argv[i], "--rel")) relativeFrames = true;   // frame numbers of --press / --capture / --save-state-at / --pace-from count from the loaded state
         else if (!std::strcmp(argv[i], "--save-state-at") && more) {   // FRAME:file - save a state at that frame and quit (makes a state from a scripted run)
             const std::string s = argv[++i];
             const size_t colon = s.find(':');
@@ -478,6 +480,13 @@ int main(int argc, char** argv) {
         const auto r = doLoad(loadStatePath);
         if (!r.first) { psx::showError("Cannot load the saved state: " + r.second); glfwTerminate(); return 2; }
         std::printf("loaded state %s (frame %llu)\n", loadStatePath.c_str(), (unsigned long long)p.frames);
+        if (relativeFrames) {
+            for (PadPress& pp : pressList) { pp.from += p.frames; pp.to += p.frames; }
+            if (captureFrame) captureFrame += p.frames;
+            if (saveStateFrame) saveStateFrame += p.frames;
+            if (paceFrom) paceFrom += p.frames;
+            if (menuAt) menuAt += p.frames;
+        }
     }
     while (!glfwWindowShouldClose(win) && !quitRequested) {
         // scripted menu input (tests): open, wait:N (N x 16 ms), shot:file.png, exit, or anything the menu understands
