@@ -297,7 +297,7 @@ void Multiplayer::buildTags() {
         tag.x = best->centre;
         tag.y = std::max(best->top - 3.0f, 14.0f);
         tag.rgb = rgbForPlayer(index - 1);
-        p.gpu.queueTag(tag);
+        if (showTags) p.gpu.queueTag(tag);
     }
     samples.clear();
 }

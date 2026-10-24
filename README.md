@@ -44,16 +44,23 @@ build\Release\cb2_play.exe <folder with SCUS_941.54 and S0-S3> [--mod <folder>].
 ```
 
 The folder is your extracted disc: `SCUS_941.54`, `SYSTEM.CNF`, `S0`..`S3`. The game boots to the title screen on its own.
-Keys: arrows = D-pad, `Z` Cross (jump), `X` Circle, `A` Square (spin), `S` Triangle, `Q`/`W` L1/R1, `Enter` Start,
-Right Shift Select, `F12` screenshot. A gamepad (XInput/SDL mapping) works as well. Saves go to `memcard0.mcr`
+Default keys (rebindable in the `Esc` menu): arrows = D-pad, `Z` Cross (jump), `X` Circle, `A` Square (spin), `S` Triangle,
+`Q`/`W` L1/R1, `E`/`R` L2/R2, `Enter` Start, Right Shift Select, `F12` screenshot. A gamepad (XInput/SDL mapping) works as well. Saves go to `memcard0.mcr`
 (standard 128 KiB PS1 card image).
 
 `--mod <folder>` overlays files onto the disc: any file in the mod folder (same relative path, e.g. `S1\S000001C.NSF`)
 replaces the original, and new files are added; several `--mod` options stack. `--ram-mb 8|16` gives the engine heap
 more memory than the 2 MiB of the retail console. See `docs/MODDING.md` and `docs/EDITING.md`.
 
-Player keys: `F1` cycles the display filter (nearest / bilinear / sharp bilinear), `F11` fullscreen, hold `Tab` to
-fast-forward, `F2` toggles the OpenGL renderer.
+Player keys: `Esc` opens the in-game menu (see below), `F1` cycles the display filter (nearest / bilinear / sharp
+bilinear), `F11` fullscreen, hold `Tab` to fast-forward, `F2` toggles the OpenGL renderer.
+
+**In-game menu (`Esc`).** Pauses the game and offers Resume, Controls, Volume, Picture (the `F1` filter), Fullscreen,
+Name tags (online only), Main menu and Quit. *Controls* rebinds all 14 PS1 buttons: pick a row, press Enter, press the new
+key (a key already in use swaps with the one you pick; `Del` clears a binding; `Esc`, `Tab`, `F1`, `F2`, `F11` and `F12`
+are reserved). *Main menu* starts a fresh copy of the game at the lobby, so you can pick another mode or room; unsaved
+progress is lost. A game pad navigates it too (D-pad, A = choose, B = back). Online, the others see you stand still while
+the menu is open. Everything you change is remembered in `cb2.cfg` (`volume`, `filter`, `nametags`, `key_<button>`).
 
 The picture is drawn by an OpenGL renderer at `--scale N` (default 4) times the original resolution. Projected
 vertices keep their unrounded GTE positions, so geometry does not wobble at high resolution (`CB2_NOPRECISE=1`

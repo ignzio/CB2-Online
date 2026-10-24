@@ -43,6 +43,7 @@ public:
     void tick();                                               // networking; call every vertical blank
     std::vector<cb2net::PlayerState> others();                 // remote players (or the test ghost)
     int puppetCount() const { return int(puppets.size()); }
+    bool showTags = true;                                      // the pause menu's "Name tags"
 
     // Addresses in the executable
     static constexpr uint32_t kObjectStep = 0x8001C718;    // runs one object: a0 = object

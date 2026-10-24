@@ -23,18 +23,21 @@
 #include "glrender.hpp"
 #include "lobby.hpp"
 #include "multiplayer.hpp"
+#include "pausemenu.hpp"
+#include "relaunch.hpp"
 #include "psx.hpp"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
 namespace {
 
-struct Key { int glfw; uint16_t bit; };
-const Key kKeys[] = {
-    {GLFW_KEY_RIGHT_SHIFT, 1u << 0}, {GLFW_KEY_ENTER, 1u << 3}, {GLFW_KEY_UP, 1u << 4}, {GLFW_KEY_RIGHT, 1u << 5},
-    {GLFW_KEY_DOWN, 1u << 6}, {GLFW_KEY_LEFT, 1u << 7}, {GLFW_KEY_Q, 1u << 10}, {GLFW_KEY_W, 1u << 11},
-    {GLFW_KEY_S, 1u << 12}, {GLFW_KEY_X, 1u << 13}, {GLFW_KEY_Z, 1u << 14}, {GLFW_KEY_A, 1u << 15},
-};
+cb2menu::PauseMenu* gMenu = nullptr;   // the key callback needs it
+
+void onKeyEvent(GLFWwindow*, int key, int, int action, int) {
+    if (!gMenu) return;
+    if (gMenu->isOpen()) gMenu->key(key, action);
+    else if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) gMenu->open();
+}
 
 const char* kVert = "#version 330 core\nlayout(location=0) in vec2 p; out vec2 uv;\n"
                     "void main(){ uv = vec2(p.x*0.5+0.5, 0.5-p.y*0.5); gl_Position = vec4(p,0,1); }\n";
@@ -72,9 +75,10 @@ GLuint compile(GLenum type, const char* src) {
     return s;
 }
 
-uint16_t readPad(GLFWwindow* win) {
+uint16_t readPad(GLFWwindow* win, const cb2input::Keys& keys) {
     uint16_t pad = 0xFFFF;
-    for (const Key& k : kKeys) if (glfwGetKey(win, k.glfw) == GLFW_PRESS) pad &= uint16_t(~k.bit);
+    for (int i = 0; i < cb2input::kBindingCount; ++i)
+        if (keys.key[i] && glfwGetKey(win, keys.key[i]) == GLFW_PRESS) pad &= uint16_t(~cb2input::kBindings[i].bit);
     GLFWgamepadstate gp;
     if (glfwJoystickIsGamepad(GLFW_JOYSTICK_1) && glfwGetGamepadState(GLFW_JOYSTICK_1, &gp)) {
         struct Map { int button; uint16_t bit; };
@@ -126,6 +130,8 @@ int main(int argc, char** argv) {
     bool noLobby = false, forceLobby = false;   // --no-lobby skips the lobby screen; --lobby shows it even with --hidden (tests)
     cb2lobby::Script lobbyScript;               // --lobby-script up,down,enter,... and --lobby-shot prefix: scripted lobby for tests
     uint64_t captureAfterPuppet = 0, puppetSince = 0;
+    uint64_t menuAt = 0;                        // --menu-at F / --menu-script open,down,...: scripted input for the in-game menu (tests)
+    std::vector<std::string> menuScript;
     uint64_t paceFrom = 0;                    // headless runs: from this frame on, run at real speed (so that two instances can meet)
     struct PadPress { uint64_t from, to; uint16_t mask; };
     std::vector<PadPress> pressList;          // --press 2310-2314:start+cross : scripted pad input for tests
@@ -153,6 +159,17 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--fake-player")) online.fake = (more && std::isdigit(static_cast<unsigned char>(argv[i + 1][0]))) ? std::atoi(argv[++i]) : 1;   // test ghost, no network
         else if (!std::strcmp(argv[i], "--name") && more) online.name = argv[++i];
         else if (!std::strcmp(argv[i], "--no-lobby")) noLobby = true;
+        else if (!std::strcmp(argv[i], "--menu-at") && more) menuAt = std::strtoull(argv[++i], nullptr, 10);
+        else if (!std::strcmp(argv[i], "--menu-script") && more) {
+            const std::string s = argv[++i];
+            for (size_t pos = 0; pos <= s.size();) {
+                const size_t comma = s.find(',', pos);
+                const std::string tok = s.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+                if (!tok.empty()) menuScript.push_back(tok);
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
+            }
+        }
         else if (!std::strcmp(argv[i], "--lobby")) forceLobby = true;
         else if (!std::strcmp(argv[i], "--lobby-shot") && more) lobbyScript.shotPrefix = argv[++i];
         else if (!std::strcmp(argv[i], "--lobby-script") && more) {
@@ -301,24 +318,109 @@ int main(int argc, char** argv) {
     }
     bool frameReady = false;
     p.onVblank = [&] { frameReady = true; mp.tick(); };
+    // settings of the in-game menu (Esc), kept in cb2.cfg
+    cb2menu::Settings settings;
+    settings.volume = cfg.volume;
+    settings.filter = cfg.filter;
+    settings.nameTags = cfg.nameTags;
+    settings.keys.load(cfg.keyNames);
     psx::AudioOut audio;
-    if (audio.start(44100)) p.spu.sink = [&](int16_t l, int16_t r) { audio.push(l, r); };
+    if (audio.start(44100)) p.spu.sink = [&](int16_t l, int16_t r) {
+        const int gain = settings.volume * settings.volume;   // 0..10000: a quadratic curve sounds more even than a linear one
+        audio.push(int16_t(int(l) * gain / 10000), int16_t(int(r) * gain / 10000));
+    };
     else std::fprintf(stderr, "no audio device; continuing silently\n");
     std::vector<uint32_t> rgba(1024 * 512, 0xFF000000u);
     int shot = 0;
-    int filterMode = 2;  // sharp bilinear by default
     bool f1Down = false, f2Down = false, f11Down = false;
     uint64_t lastTitle = 0;
+    auto toggleFullscreen = [&] {
+        if (glfwGetWindowMonitor(win)) glfwSetWindowMonitor(win, nullptr, 100, 100, 960, 720, 0);
+        else if (GLFWmonitor* m = glfwGetPrimaryMonitor()) {
+            const GLFWvidmode* vm = glfwGetVideoMode(m);
+            glfwSetWindowMonitor(win, m, 0, 0, vm->width, vm->height, vm->refreshRate);
+        }
+    };
+    cb2menu::PauseMenu menu;
+    {
+        cb2menu::PauseMenu::Context mc;
+        mc.online = mp.active();
+        mc.isFullscreen = [&] { return glfwGetWindowMonitor(win) != nullptr; };
+        mc.toggleFullscreen = toggleFullscreen;
+        if (!menu.init(&settings, mc)) std::fprintf(stderr, "the in-game menu could not start\n");
+        gMenu = &menu;
+        glfwSetKeyCallback(win, onKeyEvent);
+    }
+    bool wasPaused = false, suppressPad = false, relaunch = false, padPrimed = false;
+    size_t menuPos = 0;
+    double menuWaitUntil = 0;
+    std::string menuShotPath;
+    auto saveWindow = [&](const std::string& path, int fw, int fh) {
+        std::vector<uint8_t> px(size_t(fw) * size_t(fh) * 4);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadBuffer(GL_BACK);
+        glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+        for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
+        stbi_flip_vertically_on_write(1);
+        stbi_write_png(path.c_str(), fw, fh, 4, px.data(), fw * 4);
+    };
+    auto saveSettings = [&] {
+        cfg.remember(exeDir, "volume", std::to_string(settings.volume));
+        cfg.remember(exeDir, "filter", std::to_string(settings.filter));
+        cfg.remember(exeDir, "nametags", settings.nameTags ? "on" : "off");
+        for (int i = 0; i < cb2input::kBindingCount; ++i) cfg.remember(exeDir, std::string("key_") + cb2input::kBindings[i].id, cb2input::keyName(settings.keys.key[i]));
+    };
 
     auto padNow = [&]() {
-        uint16_t pad = readPad(win);
+        uint16_t pad = readPad(win, settings.keys);
+        // after the menu closes, keys still held from it (Enter!) must not reach the game until they have been released
+        if (suppressPad) { if (pad == 0xFFFF) suppressPad = false; else return uint16_t(0xFFFF); }
         if (autoStart && p.frames >= 2310 && p.frames <= 2314) pad &= uint16_t(~(1u << 3));
         for (const PadPress& pp : pressList) if (p.frames >= pp.from && p.frames <= pp.to) pad &= uint16_t(~pp.mask);
         return pad;
     };
     double t0 = glfwGetTime();
     uint64_t base = p.frames;
-    while (!glfwWindowShouldClose(win)) {
+    bool quitRequested = false;
+    while (!glfwWindowShouldClose(win) && !quitRequested) {
+        // scripted menu input (tests): open, wait:N (N x 16 ms), shot:file.png, exit, or anything the menu understands
+        if (!menuScript.empty() && p.frames >= menuAt && menuPos < menuScript.size() && glfwGetTime() >= menuWaitUntil) {
+            const std::string& tok = menuScript[menuPos++];
+            if (tok == "open") menu.open();
+            else if (tok == "exit") break;
+            else if (tok.rfind("wait:", 0) == 0) menuWaitUntil = glfwGetTime() + 0.016 * std::atoi(tok.c_str() + 5);
+            else if (tok.rfind("shot:", 0) == 0) menuShotPath = tok.substr(5);
+            else if (!menu.script(tok)) std::fprintf(stderr, "unknown menu script step: %s\n", tok.c_str());
+        }
+        const bool paused = menu.isOpen();
+        if (wasPaused && !paused) { wasPaused = false; padPrimed = false; suppressPad = true; t0 = glfwGetTime(); base = p.frames; }
+        std::string err;
+        if (paused) {
+            // The game is frozen. The network keeps running (we keep announcing the state we froze in) so that the others do not drop us.
+            wasPaused = true;
+            glfwPollEvents();
+            GLFWgamepadstate gp;
+            static bool padWas[5] = {};
+            if (menuScript.empty() && glfwJoystickIsGamepad(GLFW_JOYSTICK_1) && glfwGetGamepadState(GLFW_JOYSTICK_1, &gp)) {
+                const bool now[5] = {bool(gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_UP]) || gp.axes[GLFW_GAMEPAD_AXIS_LEFT_Y] < -0.6f, bool(gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_DOWN]) || gp.axes[GLFW_GAMEPAD_AXIS_LEFT_Y] > 0.6f,
+                                     bool(gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_LEFT]) || gp.axes[GLFW_GAMEPAD_AXIS_LEFT_X] < -0.6f, bool(gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_RIGHT]) || gp.axes[GLFW_GAMEPAD_AXIS_LEFT_X] > 0.6f,
+                                     bool(gp.buttons[GLFW_GAMEPAD_BUTTON_A])};
+                static const int keysFor[5] = {GLFW_KEY_UP, GLFW_KEY_DOWN, GLFW_KEY_LEFT, GLFW_KEY_RIGHT, GLFW_KEY_ENTER};
+                static bool bWas = false;
+                const bool b = gp.buttons[GLFW_GAMEPAD_BUTTON_B];
+                // whatever is already held when the menu opens does not count as a press
+                if (padPrimed) {
+                    for (int i = 0; i < 5; ++i) if (now[i] && !padWas[i]) menu.key(keysFor[i], GLFW_PRESS);
+                    if (b && !bWas) menu.key(GLFW_KEY_ESCAPE, GLFW_PRESS);
+                }
+                for (int i = 0; i < 5; ++i) padWas[i] = now[i];
+                bWas = b;
+                padPrimed = true;
+            }
+            p.padButtons = 0xFFFF;
+            mp.tick();
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        } else {
         // Emulation is paced against the wall clock at the console's 59.94 Hz so the monitor refresh does not matter.
         // Holding Tab runs unthrottled (fast-forward).
         const bool fast = glfwGetKey(win, GLFW_KEY_TAB) == GLFW_PRESS || (captureFrame != 0 && (!paceFrom || p.frames < paceFrom));
@@ -330,17 +432,20 @@ int main(int argc, char** argv) {
             continue;
         }
         if (due > 8.0 || fast) { t0 = glfwGetTime(); base = p.frames; }
-        std::string err;
         for (int step = 0; step < std::min(int(due), 4) && err.empty(); ++step) {
             frameReady = false;
             while (!frameReady && err.empty()) err = p.run(20000);
         }
+        }
         if (!err.empty()) { std::fprintf(stderr, "guest stopped: %s\n", err.c_str()); break; }
 
+        mp.showTags = settings.nameTags;
         if (captureAfterPuppet && mp.puppetCount() > 0 && !puppetSince) puppetSince = p.frames;
         const bool captureNow = captureFrame && p.frames >= captureFrame && (!captureAfterPuppet || (puppetSince && p.frames >= puppetSince + captureAfterPuppet));
-        p.gpu.flushTags();
-        if (useHires) hires.render(p.gpu);
+        if (!paused) {
+            p.gpu.flushTags();
+            if (useHires) hires.render(p.gpu);
+        }
         const auto& g = p.gpu;
         const bool hiPath = showHires && g.displayEnabled && !g.color24;
         if (captureNow && !windowCapture) {
@@ -385,13 +490,21 @@ int main(int argc, char** argv) {
         glUniform4f(glGetUniformLocation(prog, "rect"), hiPath ? float(g.displayX) / 1024.0f : 0.0f, hiPath ? float(g.displayY) / 512.0f : 0.0f,
                     float(g.hres) / 1024.0f, float(g.vres) / 512.0f);
         glUniform2f(glGetUniformLocation(prog, "area"), float(g.hres) * srcScale, float(g.vres) * srcScale);
-        glUniform1i(glGetUniformLocation(prog, "mode"), filterMode);
+        glUniform1i(glGetUniformLocation(prog, "mode"), settings.filter);
         glUniform1f(glGetUniformLocation(prog, "prescale"), std::max(1.0f, std::ceil(float(vh) / (float(g.vres) * srcScale))));
-        const GLint mag = (filterMode == 0 && !hiPath) ? GL_NEAREST : GL_LINEAR;
+        const GLint mag = (settings.filter == 0 && !hiPath) ? GL_NEAREST : GL_LINEAR;
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mag);
         glBindVertexArray(vao);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        if (menu.isOpen()) {
+            menu.draw(glfwGetTime());
+            if (!menuShotPath.empty()) { saveWindow(menuShotPath, fw, fh); std::printf("menu picture saved to %s\n", menuShotPath.c_str()); menuShotPath.clear(); }
+        }
+        const cb2menu::Result menuResult = menu.takeResult();
+        if (menuResult == cb2menu::Result::Quit) quitRequested = true;
+        else if (menuResult == cb2menu::Result::MainMenu) { quitRequested = true; relaunch = true; }
+        if (menu.takeChanged()) saveSettings();
         if (captureNow && windowCapture) {
             std::vector<uint8_t> px(size_t(fw) * size_t(fh) * 4);
             glPixelStorei(GL_PACK_ALIGNMENT, 1);
@@ -406,17 +519,11 @@ int main(int argc, char** argv) {
         glfwSwapBuffers(win);
         glfwPollEvents();
 
-        p.padButtons = padNow();
+        p.padButtons = menu.isOpen() ? uint16_t(0xFFFF) : padNow();
         auto edge = [&](int key, bool& was) { const bool down = glfwGetKey(win, key) == GLFW_PRESS; const bool hit = down && !was; was = down; return hit; };
-        if (edge(GLFW_KEY_F1, f1Down)) filterMode = (filterMode + 1) % 3;
+        if (edge(GLFW_KEY_F1, f1Down)) { settings.filter = (settings.filter + 1) % 3; saveSettings(); }
         if (edge(GLFW_KEY_F2, f2Down) && useHires) { showHires = !showHires; p.gpu.rasterize = !showHires; }
-        if (edge(GLFW_KEY_F11, f11Down)) {
-            if (glfwGetWindowMonitor(win)) glfwSetWindowMonitor(win, nullptr, 100, 100, 960, 720, 0);
-            else if (GLFWmonitor* m = glfwGetPrimaryMonitor()) {
-                const GLFWvidmode* vm = glfwGetVideoMode(m);
-                glfwSetWindowMonitor(win, m, 0, 0, vm->width, vm->height, vm->refreshRate);
-            }
-        }
+        if (edge(GLFW_KEY_F11, f11Down)) toggleFullscreen();
         if (glfwGetKey(win, GLFW_KEY_F12) == GLFW_PRESS) {
             char name[64];
             std::snprintf(name, sizeof name, "cb2_shot_%03d.png", shot++);
@@ -429,6 +536,12 @@ int main(int argc, char** argv) {
             else std::snprintf(t, sizeof t, "Crash Bandicoot 2 (native port) - frame %llu", (unsigned long long)p.frames);
             glfwSetWindowTitle(win, t);
         }
+    }
+    if (relaunch) {
+        mp.stop();   // frees the network port for the new copy
+        glfwTerminate();
+        cb2::relaunchToLobby(argc, argv);
+        return 0;
     }
     glfwTerminate();
     return 0;

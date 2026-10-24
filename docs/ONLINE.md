@@ -27,6 +27,10 @@ can come back at any time and is simply picked up again. A rendezvous server is 
 
 `lobby = off` in `cb2.cfg`, `--no-lobby`, `Play offline (no lobby).bat`, or any of the command-line options below skip the lobby.
 
+Inside the game, `Esc` opens a pause menu (keys, volume, picture, name tags, fullscreen) whose **Main menu** entry leaves the room
+and returns to this lobby (it starts a fresh copy of the game with `--lobby`). While it is open the others see your Crash stand
+still; the network keeps running so nobody drops you. Hide the name tags there if you prefer.
+
 ## The online lobby service (optional)
 
 **Play online** lists every open room and dedicated server from everywhere, and joining needs no typing and no port forwarding. That

@@ -1,5 +1,6 @@
 #include "config.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
@@ -32,6 +33,10 @@ bool Config::load(const std::string& exeDir) {
             else if (k == "card") card = v;
             else if (k == "scale") scale = std::atoi(v.c_str());
             else if (k == "ram_mb") ramMb = std::atoi(v.c_str());
+            else if (k == "volume") volume = std::max(0, std::min(100, std::atoi(v.c_str())));
+            else if (k == "filter") filter = std::max(0, std::min(2, std::atoi(v.c_str())));
+            else if (k == "nametags") nameTags = !(v == "off" || v == "0" || v == "no" || v == "false");
+            else if (k.rfind("key_", 0) == 0) keyNames[k.substr(4)] = v;
             else if (k == "name") name = v;
             else if (k == "room") room = v;
             else if (k == "rendezvous") rendezvous = v;

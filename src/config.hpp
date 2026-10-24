@@ -5,12 +5,17 @@
 //   card    = saves\memcard0.mcr       memory card image
 //   scale   = 4                        internal resolution multiplier of the OpenGL renderer
 //   ram_mb  = 8                        engine heap size (2..16)
+//   volume  = 100                      0..100 (in-game menu: Esc)
+//   filter  = 2                        0 nearest, 1 bilinear, 2 sharp bilinear
+//   nametags = on                      names over the other players
+//   key_cross = Z                      keyboard bindings: key_up/down/left/right/cross/square/circle/triangle/l1/r1/l2/r2/start/select
 //   name    = Player                   name shown above your Crash in online play (cb2_play / Crash2.exe)
 //   room    = PUBLIC                   online room: players who type the same name meet
 //   rendezvous = my.server.com:7777    rendezvous server (cb2_server) that introduces players to each other; empty = this PC / LAN only
 //   directory = https://cb2-lobby.example.workers.dev   lobby service (docs/LOBBY_PROTOCOL.md): lists open servers and rooms; built in, this only overrides it
 //   lobby   = off                      do not show the online lobby before the game
 // Command-line options override the file. The file is searched in the current folder, then next to the executable.
+#include <map>
 #include <string>
 #include <cstdint>
 #include <vector>
@@ -23,6 +28,11 @@ struct Config {
     std::string card = "memcard0.mcr";
     int scale = 4;
     int ramMb = 2;
+    // Set in the in-game menu (Esc) and saved here: volume 0..100, display filter 0 nearest / 1 bilinear / 2 sharp bilinear, name tags over
+    // the other players, and the keyboard bindings (`key_cross = Z` ... see src/keymap.hpp; id -> key name).
+    int volume = 100, filter = 2;
+    bool nameTags = true;
+    std::map<std::string, std::string> keyNames;
     bool lobby = true;         // show the online lobby before the game starts (lobby = off disables it)
 #ifndef CB2_DEFAULT_DIRECTORY
 #define CB2_DEFAULT_DIRECTORY ""
