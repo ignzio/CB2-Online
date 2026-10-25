@@ -18,10 +18,17 @@ public:
     int scale() const { return scaleFactor; }
     // 0: every texel is read as it is (the console's look); 1: bilinear, within the polygon's own texture coordinates and without blending in transparent texels
     void setTextureFilter(int mode) { textureFilter = mode; }
+    // Perspective-correct texturing (what the GTE depth makes possible): the console interpolates texture coordinates linearly on the screen, which makes textures swim and
+    // warp on large polygons; with this on, the polygons' depth is used so they are interpolated as a real 3D surface would be.
+    void setPerspective(bool on) { perspective = on; }
+    // Widescreen: the picture is shown wider than 4:3, so 3D polygons are squeezed horizontally by "factor" (4/3 divided by the new aspect ratio) around the middle of their draw area and the
+    // stretch of the display puts them back to their true shape; 2D polygons (HUD, sprites) are squeezed too, but pinned towards the nearest edge so they keep their shape and their place.
+    // Whatever the game culled at the edge of its 4:3 view is not there to be shown: wide pictures can have empty or missing margins. 1 = off.
+    void setWidescreen(float factor) { wide = factor; }
     // Replays and clears gpu.cmds / gpu.cmdPool.
     void render(Gpu& gpu);
     // An in-between picture drawn from the given commands (without VRAM uploads) into a second target of the same layout; midTexture() holds it.
-    void renderMid(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& texts, int hres);
+    void renderMid(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& texts, int hres, int vres, int displayX, int displayY);
     GLuint colorTexture() const { return colorTex; }
     GLuint midTexture() const { return midTex; }
     int textureWidth() const { return 1024 * scaleFactor; }
@@ -30,15 +37,19 @@ public:
     void readDisplay(const Gpu& gpu, std::vector<uint32_t>& rgba, int& w, int& h, bool mid = false) const;
 
 private:
-    struct Vertex { float x, y, u, v, r, g, b; int32_t a[4]; int32_t b2[4]; float bounds[4]; };
+    struct Vertex { float x, y, u, v, r, g, b; int32_t a[4]; int32_t b2[4]; float bounds[4]; float w; };
     struct State { int blend = -1; int16_t area[4] = {0, 0, 1023, 511}; bool operator!=(const State& o) const; };
 
     int scaleFactor = 2, textHres = 320;
-    GLuint fbo = 0, colorTex = 0, vramTex = 0, uploadTex = 0, mainProg = 0, blitProg = 0, vao = 0, vbo = 0, blitVao = 0, midFbo = 0, midTex = 0, midStencil = 0;
+    GLuint fbo = 0, colorTex = 0, vramTex = 0, uploadTex = 0, mainProg = 0, blitProg = 0, vao = 0, vbo = 0, blitVao = 0, midFbo = 0, midTex = 0, tmpFbo = 0, tmpTex = 0, compProg = 0;
     std::vector<Vertex> batch;
     State cur;
     GLint blitRect = -1, blitTex = -1, mainVram = -1, mainFilter = -1;
     int textureFilter = 0;
+    bool perspective = false;
+    float wide = 1.0f;
+    float gpuAreaLeft = 0, gpuAreaWidth = 320;   // the screen's area while its commands are replayed (for name tags)
+    void widen(GpuCmd& c) const;
 
     void replay(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& texts, const std::vector<uint16_t>* pool);
     void flush();

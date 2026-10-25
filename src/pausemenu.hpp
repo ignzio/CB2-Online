@@ -28,6 +28,8 @@ struct Settings {
     bool timer = true;       // the level timer in the corner
     bool smooth = false;     // 60 fps: an in-between picture every other vertical blank
     int textures = 0;        // 0 sharp, 1 smooth (bilinear texture filtering)
+    bool perspective = false; // perspective-correct texturing
+    bool widescreen = false;  // show the picture at the window's aspect ratio instead of 4:3
     bool vsync = true;       // wait for the monitor's refresh when showing a picture
     cb2input::Keys keys;     // keyboard and game pad bindings
 };
@@ -73,8 +75,8 @@ public:
     cb2ui::Canvas& surface() { return canvas; }   // for the overlay (hud.hpp), which draws with the same font
 
 private:
-    enum class Page { Closed, Main, Sound, Online, Records, Controls, Capture, ConfirmMenu, ConfirmQuit };
-    enum Item { kResume, kSound, kOnline, kRecords, kControls, kMainMenu, kQuit, kVolume, kFilter, kFullscreen, kTimer, kSmooth, kVsync, kTextures, kTags, kOpacity, kRoster, kBack };
+    enum class Page { Closed, Main, Sound, Graphics, Online, Records, Controls, Capture, ConfirmMenu, ConfirmQuit };
+    enum Item { kResume, kSound, kGraphics, kPerspective, kWide, kOnline, kRecords, kControls, kMainMenu, kQuit, kVolume, kFilter, kFullscreen, kTimer, kSmooth, kVsync, kTextures, kTags, kOpacity, kRoster, kBack };
     struct Hit { float x, y, w, h; int index; };
 
     cb2ui::Canvas canvas;

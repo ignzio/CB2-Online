@@ -41,6 +41,9 @@ bool Config::load(const std::string& exeDir) {
             else if (k == "smooth") smooth = (v == "on" || v == "1" || v == "yes" || v == "true");
             else if (k == "disc_speed") discSpeed = std::max(1, std::min(24, std::atoi(v.c_str())));
             else if (k == "reverb") reverb = !(v == "off" || v == "0" || v == "no" || v == "false");
+            else if (k == "refresh_rate") refreshRate = std::max(0, std::min(1000, std::atoi(v.c_str())));
+            else if (k == "perspective") perspective = (v == "on" || v == "1" || v == "yes" || v == "true");
+            else if (k == "widescreen") widescreen = (v == "on" || v == "1" || v == "yes" || v == "true");
             else if (k == "vsync") vsync = !(v == "off" || v == "0" || v == "no" || v == "false");
             else if (k == "roster") roster = !(v == "off" || v == "0" || v == "no" || v == "false");
             else if (k.rfind("pad_", 0) == 0) padNames[k.substr(4)] = v;

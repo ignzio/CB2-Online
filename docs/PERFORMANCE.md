@@ -32,7 +32,26 @@ Frames that contain framebuffer uploads (videos, loading pictures) are never int
   real frame: the program then also reports how many pixels differ from the real picture, which must be 0; `1` is the previous frame).
   `CB2_SMOOTHLOG=1` prints how many triangles were matched for each in-between picture. `cb2_interptest` tests the matching.
 
-## Loading: the freezes between zones and levels
+## High refresh rate monitors (160 Hz and the like)
+
+With 60 fps smoothing on and a monitor of 90 Hz or more (`refresh_rate = 0` asks the monitor; or set it by hand), every refresh of the monitor shows its own picture:
+the game still thinks at 30 fps and the emulation runs at 59.94 Hz, but the renderer draws, for each refresh, the picture for that exact moment between the two newest real frames
+(the motion of every polygon is scaled by how far along the moment is). On a 160 Hz monitor that is 160 distinct pictures a second instead of 60 with repeats, so motion has no
+judder. The matching of the two frames is made once per real frame and reused by every picture in between, and only the visible part of the target is touched, which is what makes
+160 Hz affordable (about 3 ms of rendering per game frame). Cost: the picture runs about one game frame (17 ms) behind. `CB2_PERF=1` prints how many pictures are presented per
+second; `CB2_FAKEHZ=160` pretends to have such a monitor, `CB2_CONTINUOUS=1` forces the mode.
+
+## Perspective-correct textures and widescreen (Esc -> Graphics)
+
+- **Perspective** (`perspective = on`): the console interpolates texture coordinates linearly across the screen, so textures swim and warp on big floors and walls. The GTE hands over the depth
+  of every projected vertex; the renderer passes it on as the clip-space `w`, and the hardware then interpolates the texture coordinates as for a real 3D surface. Polygons without a
+  known depth (2D, sprites) are untouched. This is the part of DuckStation's PGXP that matters for textures; the geometry precision of PGXP (unrounded vertices) was already there.
+- **Widescreen** (`widescreen = on`): the picture is shown at the window's aspect ratio (up to 21:9). 3D polygons are squeezed horizontally around the middle of the screen by 4:3 / aspect, and the
+  wider display stretches them back to their true shape, so the view gets more room at the sides; the HUD is squeezed the same way but pinned towards its edge so it keeps its shape. Limit: the game
+  does not draw what lies beyond its own 4:3 view (it culls it), so the new margins show only what the engine happened to draw there: some edges are empty or end in cut-off geometry.
+  A true widescreen mode needs the engine's culling widened, which is a hack into the game code per level (not done).
+- **PGXP depth buffer** is not implemented: the game depends on painter's-algorithm order, and a depth buffer from the GTE depth would change what is drawn on top.
+
 
 The pauses when the game changes zone or level are the game waiting for its disc. The emulated drive used to read at the console's real double speed
 (150 sectors a second) with a 12 ms spin-up per read, so a level load took 2.5 to 5 seconds, as on a real PlayStation. Now the emulated drive is faster

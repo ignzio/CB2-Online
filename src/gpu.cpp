@@ -49,6 +49,7 @@ void Gpu::recordTri(const Vtx& a, const Vtx& b, const Vtx& c, bool textured, boo
         g.u[i] = float(v[i]->u); g.v[i] = float(v[i]->v);
         g.col[i][0] = uint8_t(v[i]->r); g.col[i][1] = uint8_t(v[i]->g); g.col[i][2] = uint8_t(v[i]->b);
     }
+    if (a.fz > 0 && b.fz > 0 && c.fz > 0) { g.w[0] = a.fz; g.w[1] = b.fz; g.w[2] = c.fz; }
     g.textured = textured; g.raw = raw; g.semi = semiOn; g.semiMode = uint8_t(semi); g.depth = uint8_t(depth);
     g.tpx = uint8_t(tpX); g.tpy = uint8_t(tpY);
     g.twMX = uint8_t(twMaskX); g.twMY = uint8_t(twMaskY); g.twOX = uint8_t(twOffX); g.twOY = uint8_t(twOffY);
@@ -417,7 +418,7 @@ void Gpu::execute() {
             v[i].x = sext11(xy & 0x7FF) + offX; v[i].y = sext11((xy >> 16) & 0x7FF) + offY;
             if (pgxp && recording) {
                 auto it = pgxp->find(xy);
-                if (it != pgxp->end()) { v[i].fx = it->second[0] + float(offX); v[i].fy = it->second[1] + float(offY); }
+                if (it != pgxp->end()) { v[i].fx = it->second[0] + float(offX); v[i].fy = it->second[1] + float(offY); v[i].fz = it->second[2]; }
             }
             if (tex) {
                 const uint32_t uv = fifo[p++];

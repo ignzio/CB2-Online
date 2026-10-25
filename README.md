@@ -35,7 +35,9 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 **Graphics and sound**
 - **OpenGL renderer** at up to 8x the original resolution (default 4x) with unrounded vertex positions, so the geometry does not wobble.
 - **60 fps smoothing** (optional): the game draws 30 pictures per second; this draws the pictures in between.
-- **Smooth textures** (optional): bilinear filtering instead of the blocky texels.
+- **Smooth textures** (optional): bilinear filtering instead of the blocky texels. **Perspective-correct textures** (optional): no more swimming textures on floors and walls.
+- **Widescreen** (optional): the picture at your window's aspect ratio (see the limits below).
+- **High refresh rates:** with 60 fps smoothing on a 90+ Hz monitor every refresh shows its own picture (160 Hz = 160 distinct pictures a second).
 - Display filters (nearest / bilinear / sharp bilinear), fullscreen, vsync, 4:3 picture whatever the window shape.
 - Volume slider; the original sound and music.
 
@@ -116,7 +118,8 @@ Left-Right or dragging to move a slider, `Esc` / B / right click to go back.
 
 | Page | What is on it |
 | --- | --- |
-| **Sound and picture** | volume, display filter, **textures** (sharp / smooth), fullscreen, **60 fps smoothing**, vsync, level timer |
+| **Sound and picture** | volume, display filter, fullscreen, level timer |
+| **Graphics** | **textures** (sharp / smooth), **perspective** correction, **widescreen**, **60 fps smoothing**, vsync |
 | **Online** | name tags, **opacity of the other players**, the player list |
 | **Records** | your best time and runs per level |
 | **Controls** | keyboard and game pad bindings side by side; `Enter` rebinds, `Del` clears, a key already in use swaps |
@@ -156,7 +159,8 @@ Everything in the menu is remembered in `cb2.cfg` next to `Crash2.exe`; the file
 | --- | --- |
 | `name`, `room` | your name above your Crash; the room you meet people in |
 | `scale` | internal resolution multiplier (1-8) |
-| `volume`, `filter`, `textures`, `smooth`, `vsync`, `timer` | the *Sound and picture* page |
+| `volume`, `filter`, `timer` | the *Sound and picture* page |
+| `textures`, `perspective`, `widescreen`, `smooth`, `vsync`, `refresh_rate` | the *Graphics* page (`refresh_rate = 0` uses your monitor's rate) |
 | `disc_speed` | how many times faster than the console's drive the game's disc reads are (1-24, default 16) |
 | `nametags`, `opacity`, `roster` | the *Online* page |
 | `key_<button>`, `pad_<button>` | bindings |
@@ -191,6 +195,7 @@ cmake --build build --config Release
 ## Known limits
 
 - Other players are shown, not solid: no collision and no shared crates or enemies.
+- Widescreen shows only what the game itself draws beyond its 4:3 view, so the new side margins can be empty at some edges. There is no PGXP depth buffer, and the renderer is OpenGL only (no Vulkan or DX12; the renderer is not the bottleneck).
 - The end of a level is detected through the game's own "go to the next level" request; it is verified for entering a level, and a real level end has not been
   captured yet ([docs/SPEEDRUN.md](docs/SPEEDRUN.md)). Please report a finished level that is not counted.
 - Loads are about 15 times shorter than on a console (`disc_speed`); what remains is the game's own work. If you still see a freeze, run with `CB2_FRAMELOG=1` and send the log.

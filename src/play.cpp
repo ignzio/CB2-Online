@@ -156,6 +156,7 @@ int main(int argc, char** argv) {
     std::string capturePath;
     bool autoStart = false, hidden = false, interpOnly = false;   // --autostart presses Start at the title screen; --hidden hides the window
     bool windowCapture = false;
+    int windowW = 960, windowH = 720;   // --window WxH: the size of the window (tests)
     std::string recordDir;                       // --record DIR:EVERY:COUNT:START - save the window every EVERY frames, COUNT times, from frame START, then quit (footage for the README)
     uint64_t recordEvery = 4, recordCount = 0, recordStart = 0, recordNext = 0, recordDone = 0;
     bool forceSmooth = false, captureMid = false;   // tests: 60 fps smoothing on from the start, and --capture saves an in-between picture
@@ -215,6 +216,7 @@ int main(int argc, char** argv) {
             if (f.size() > 2) recordCount = std::strtoull(f[2].c_str(), nullptr, 10);
             if (f.size() > 3) recordStart = std::strtoull(f[3].c_str(), nullptr, 10);
         }
+        else if (!std::strcmp(argv[i], "--window") && more) { windowW = std::atoi(argv[++i]); const char* x = std::strchr(argv[i], 'x'); if (x) windowH = std::atoi(x + 1); }
         else if (!std::strcmp(argv[i], "--smooth")) forceSmooth = true;
         else if (!std::strcmp(argv[i], "--textures") && more) cfg.textures = std::strcmp(argv[++i], "smooth") == 0 || std::strcmp(argv[i], "1") == 0 ? 1 : 0;
         else if (!std::strcmp(argv[i], "--smooth-t") && more) smoothT = float(std::atof(argv[++i]));
@@ -336,7 +338,7 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    GLFWwindow* win = glfwCreateWindow(960, 720, "Crash Bandicoot 2 (native port)", nullptr, nullptr);
+    GLFWwindow* win = glfwCreateWindow(windowW, windowH, "Crash Bandicoot 2 (native port)", nullptr, nullptr);
     if (!win) { psx::showError("cannot create an OpenGL 3.3 window (update the graphics driver)"); return 1; }
     glfwMakeContextCurrent(win);
     glfwSwapInterval(0);
@@ -444,12 +446,29 @@ int main(int argc, char** argv) {
     settings.timer = cfg.timer;
     settings.smooth = cfg.smooth || forceSmooth;
     settings.textures = cfg.textures;
+    settings.widescreen = cfg.widescreen || std::getenv("CB2_WIDESCREEN") != nullptr;
+    settings.perspective = cfg.perspective || std::getenv("CB2_PERSPECTIVE") != nullptr;
     settings.vsync = cfg.vsync;
     psx::FrameInterpolator interp;
     std::vector<psx::GpuCmd> midCmds;
     std::vector<std::string> midTexts;
     int appliedVsync = -1;
-    settings.keys.load(cfg.keyNames, cfg.padNames);
+    float wideAspect = 4.0f / 3.0f;
+    uint64_t presentCount = 0, perfPresents = 0;
+    // Continuous interpolation for fast monitors: every presentation shows the picture for its own moment between the game's real frames (pairFrames = the vertical
+    // blank the newer of the two flipped in at). The picture runs about one game frame behind the real one while it is on.
+    bool pairValid = false;
+    uint64_t pairFrames = 0;
+    double nextPresent = 0;
+    const bool forceContinuous = std::getenv("CB2_CONTINUOUS") != nullptr;
+    auto monitorHz = [&]() -> double {
+        if (const char* f = std::getenv("CB2_FAKEHZ")) return std::atof(f);
+        if (cfg.refreshRate > 0) return double(cfg.refreshRate);
+        GLFWmonitor* mon = glfwGetWindowMonitor(win);
+        if (!mon) mon = glfwGetPrimaryMonitor();
+        const GLFWvidmode* vm = mon ? glfwGetVideoMode(mon) : nullptr;
+        return vm && vm->refreshRate > 0 ? double(vm->refreshRate) : 60.0;
+    };    settings.keys.load(cfg.keyNames, cfg.padNames);
     p.cd.speedup = uint32_t(cfg.discSpeed);
     if (const char* ds = std::getenv("CB2_DISCSPEED")) p.cd.speedup = uint32_t(std::max(1, std::atoi(ds)));   // tests
     p.spu.reverb = cfg.reverb && !std::getenv("CB2_NOREVERB");
@@ -508,6 +527,8 @@ int main(int argc, char** argv) {
         cfg.remember(exeDir, "opacity", std::to_string(settings.opacity));
         cfg.remember(exeDir, "roster", settings.roster ? "on" : "off");
         cfg.remember(exeDir, "timer", settings.timer ? "on" : "off");
+        cfg.remember(exeDir, "widescreen", settings.widescreen ? "on" : "off");
+        cfg.remember(exeDir, "perspective", settings.perspective ? "on" : "off");
         cfg.remember(exeDir, "textures", settings.textures ? "smooth" : "sharp");
         cfg.remember(exeDir, "smooth", settings.smooth ? "on" : "off");
         cfg.remember(exeDir, "vsync", settings.vsync ? "on" : "off");
@@ -518,7 +539,8 @@ int main(int argc, char** argv) {
     };
 
     auto padNow = [&]() {
-        uint16_t pad = readPad(win, settings.keys);
+        // Scripted runs (a capture, a hidden window, CB2_NOINPUT) ignore the real keyboard and game pad: their result must not depend on what anybody is doing on the machine meanwhile.
+        uint16_t pad = (captureFrame || hidden || std::getenv("CB2_NOINPUT")) ? uint16_t(0xFFFF) : readPad(win, settings.keys);
         // after the menu closes, keys still held from it (Enter!) must not reach the game until they have been released
         if (suppressPad) { if (pad == 0xFFFF) suppressPad = false; else return uint16_t(0xFFFF); }
         if (autoStart && p.frames >= 2310 && p.frames <= 2314) pad &= uint16_t(~(1u << 3));
@@ -622,6 +644,8 @@ int main(int argc, char** argv) {
             else if (!menu.script(tok)) std::fprintf(stderr, "unknown menu script step: %s\n", tok.c_str());
         }
         const bool paused = menu.isOpen();
+        bool fast = false, continuous = false;
+        const double hz = monitorHz();
         if (wasPaused && !paused) { wasPaused = false; padPrimed = false; suppressPad = true; t0 = glfwGetTime(); base = p.frames; }
         std::string err;
         if (paused) {
@@ -677,9 +701,10 @@ int main(int argc, char** argv) {
         } else {
         // Emulation is paced against the wall clock at the console's 59.94 Hz so the monitor refresh does not matter.
         // Holding Tab runs unthrottled (fast-forward).
-        const bool fast = glfwGetKey(win, GLFW_KEY_TAB) == GLFW_PRESS || (captureFrame != 0 && (!paceFrom || p.frames < paceFrom));
+        fast = glfwGetKey(win, GLFW_KEY_TAB) == GLFW_PRESS || (captureFrame != 0 && (!paceFrom || p.frames < paceFrom));
         const double due = fast ? 4.0 : (glfwGetTime() - t0) * 59.94 - double(p.frames - base);
-        if (due < 1.0) {
+        continuous = settings.smooth && useHires && showHires && pairValid && !fast && (hz >= 90.0 || forceContinuous);
+        if (due < 1.0 && !continuous) {
             glfwPollEvents();
             p.padButtons = padNow();
             // sleep while the next frame is still a few milliseconds away, then spin for the rest: the sleep alone is too coarse to keep an even rhythm
@@ -746,15 +771,34 @@ int main(int argc, char** argv) {
             if (useHires && settings.smooth && showHires) flipped = interp.feed(p.gpu.cmds, p.gpu.textPool);
             else interp.reset();
             hires.setTextureFilter(settings.textures);
-            if (useHires) hires.render(p.gpu);
+            hires.setPerspective(settings.perspective);
+            {   // widescreen: how much wider than 4:3 the window is (capped at 21:9)
+                int ww = 0, wh = 0;
+                glfwGetFramebufferSize(win, &ww, &wh);
+                const float aspect = std::min(2.4f, std::max(4.0f / 3.0f, wh > 0 ? float(ww) / float(wh) : 4.0f / 3.0f));
+                wideAspect = settings.widescreen && !captureMid ? aspect : 4.0f / 3.0f;
+                hires.setWidescreen((4.0f / 3.0f) / wideAspect);
+            }
+            if (useHires && !p.gpu.cmds.empty()) hires.render(p.gpu);
+            if (flipped && !interp.canInterpolate()) pairValid = false;
             if (flipped && !interp.canInterpolate()) {
                 static const bool smoothLog2 = std::getenv("CB2_SMOOTHLOG") != nullptr;
                 if (smoothLog2) std::printf("[smooth] frame %llu: no in-between picture (%s)\n", (unsigned long long)p.frames, interp.whyNot());
             }
-            if (flipped && interp.canInterpolate() && interp.flipStamp() == uint32_t(p.gpu.vblankCount)) {   // the flip belongs to this very vertical blank
+            const bool contMode = settings.smooth && useHires && showHires && (hz >= 90.0 || forceContinuous);
+            if (flipped && contMode && interp.canInterpolate() && interp.flipStamp() == uint32_t(p.gpu.vblankCount)) { pairValid = true; pairFrames = p.frames; }
+            if (contMode && pairValid && !fast) {
+                const double e = (glfwGetTime() - t0) * 59.94 + double(base);
+                const float tt = float(std::max(0.0, std::min(1.0, 1.0 - (e - double(pairFrames)) / 2.0)));
+                if (tt > 0.002f) {
+                    interp.build(tt, midCmds, midTexts);
+                    hires.renderMid(midCmds, midTexts, p.gpu.hres, p.gpu.vres, p.gpu.displayX, p.gpu.displayY);
+                    showMid = true;
+                }
+            } else if (flipped && interp.canInterpolate() && interp.flipStamp() == uint32_t(p.gpu.vblankCount)) {   // the flip belongs to this very vertical blank
                 psx::FrameInterpolator::Stats st;
                 interp.build(smoothT, midCmds, midTexts, &st);
-                hires.renderMid(midCmds, midTexts, p.gpu.hres);
+                hires.renderMid(midCmds, midTexts, p.gpu.hres, p.gpu.vres, p.gpu.displayX, p.gpu.displayY);
                 showMid = true;
                 static const bool smoothLog = std::getenv("CB2_SMOOTHLOG") != nullptr;
                 if (smoothLog) std::printf("[smooth] frame %llu: %zu triangles, %zu matched, semi-transparent %zu of which matched %zu\n", (unsigned long long)p.frames, st.triangles, st.matched, st.semi, st.semiMatched);
@@ -805,9 +849,10 @@ int main(int argc, char** argv) {
         int fw, fh;
         glfwGetFramebufferSize(win, &fw, &fh);
         glClear(GL_COLOR_BUFFER_BIT);
-        // keep the console's 4:3 picture whatever the window shape
-        int vw = fw, vh = fw * 3 / 4;
-        if (vh > fh) { vh = fh; vw = fh * 4 / 3; }
+        // keep the picture's aspect ratio (4:3, or the window's own with widescreen) whatever the window shape
+        const float pa = hiPath ? wideAspect : 4.0f / 3.0f;
+        int vw = fw, vh = int(float(fw) / pa);
+        if (vh > fh) { vh = fh; vw = int(float(fh) * pa); }
         glViewport((fw - vw) / 2, (fh - vh) / 2, vw, vh);
         glUseProgram(prog);
         const float srcScale = hiPath ? float(hires.scale()) : 1.0f;
@@ -821,6 +866,11 @@ int main(int argc, char** argv) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mag);
         glBindVertexArray(vao);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        {   // the menu and the overlay are laid out for 4:3: they stay in the middle of a wide picture
+            int mw = fw, mh = fw * 3 / 4;
+            if (mh > fh) { mh = fh; mw = fh * 4 / 3; }
+            glViewport((fw - mw) / 2, (fh - mh) / 2, mw, mh);
+        }
         menu.draw(glfwGetTime());
         if (!menu.isOpen()) {
             std::vector<cb2hud::Row> rows;
@@ -879,7 +929,13 @@ int main(int argc, char** argv) {
             if (++recordDone >= recordCount) { std::printf("recorded %llu pictures to %s\n", (unsigned long long)recordDone, recordDir.c_str()); break; }
         }
         const auto swapBegan = std::chrono::steady_clock::now();
+        if (continuous && !wantVsync) {   // without vsync the presentation rate is held to the monitor's by hand
+            const double now = glfwGetTime();
+            if (nextPresent > now) while (glfwGetTime() < nextPresent) std::this_thread::yield();
+            nextPresent = std::max(nextPresent + 1.0 / hz, glfwGetTime() - 0.002);
+        }
         glfwSwapBuffers(win);
+        ++presentCount;
         glfwPollEvents();
         msSwap += since(swapBegan);
 
@@ -914,6 +970,8 @@ int main(int argc, char** argv) {
             if (perf && p.frames - perfFrames >= 600) {
                 const double n = double(p.frames - perfFrames), wall = glfwGetTime() - perfWall;
                 std::printf("[perf] per frame: emulate %.2f ms, render %.2f ms, swap %.2f ms; wall %.2f ms (%.0f frames/s)\n", (msRun - perfRun) / n, (msRender - perfRender) / n, (msSwap - perfSwap) / n, wall * 1000.0 / n, n / wall);
+                std::printf("[perf] presented %.1f pictures per second\n", double(presentCount - perfPresents) / wall);
+                perfPresents = presentCount;
                 if (pcHistMap) {
                     std::vector<std::pair<uint64_t, uint32_t>> top;
                     uint64_t all = 0;

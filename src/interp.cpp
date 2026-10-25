@@ -59,6 +59,7 @@ bool FrameInterpolator::feed(const std::vector<GpuCmd>& cmds, const std::vector<
             acc = Frame();
             started = true;
             flipped = true;
+            prepared = false;
             lastFlipAt = c.color;
             break;
         }
@@ -77,19 +78,25 @@ bool FrameInterpolator::feed(const std::vector<GpuCmd>& cmds, const std::vector<
     return flipped;
 }
 
-void FrameInterpolator::build(float t, std::vector<GpuCmd>& out, std::vector<std::string>& texts, Stats* stats) const {
-    out = cur.cmds;
-    texts = cur.texts;
+// The matching of the newest frame against the one before it: what every triangle of the newest frame does to get to where it was. It depends on the pair only, so it is done once per
+// flip (prepare) and every picture in between (build) just scales the movements by its own "how far back".
+void FrameInterpolator::prepare() const {
+    std::vector<GpuCmd> out = cur.cmds;   // the geometry the matching reads (never drawn)
+    vdisp.assign(cur.cmds.size(), std::array<float, 6>{});
+    vgrow.assign(cur.cmds.size(), 0);
+    textMoves.clear();
+    prepared = true;
 
     // ---- name tags: follow the same string
     {
         std::vector<uint8_t> usedText(prev.texts.size(), 0);
-        for (GpuCmd& o : out) {
+        for (uint32_t oi = 0; oi < out.size(); ++oi) {
+            GpuCmd& o = out[oi];
             if (o.kind != GpuCmd::Kind::Text) continue;
             for (const GpuCmd& p : prev.cmds) {
                 if (p.kind != GpuCmd::Kind::Text || usedText[p.poolOffset] || prev.texts[p.poolOffset] != cur.texts[o.poolOffset]) continue;
                 const float dx = (p.x[0] - float(prev.ox)) - (o.x[0] - float(cur.ox)), dy = (p.y[0] - float(prev.oy)) - (o.y[0] - float(cur.oy));
-                if (std::fabs(dx) + std::fabs(dy) <= kMaxMove) { o.x[0] += dx * t; o.y[0] += dy * t; usedText[p.poolOffset] = 1; }
+                if (std::fabs(dx) + std::fabs(dy) <= kMaxMove) { textMoves.push_back({float(oi), dx, dy}); usedText[p.poolOffset] = 1; }
                 break;
             }
         }
@@ -225,7 +232,10 @@ void FrameInterpolator::build(float t, std::vector<GpuCmd>& out, std::vector<std
             dv[v][0] = it->second[0]; dv[v][1] = it->second[1]; has[v] = true;
             mx += dv[v][0]; my += dv[v][1]; ++n;
         }
-        if (c.semi && !isMatched[i]) continue;   // see-through effects without a trustworthy partner stay where the newest frame has them
+        // See-through effects without a trustworthy partner stay where the newest frame has them, unless all three corners are corners of geometry that did move (the water,
+        // ice and glass layers drawn over a floor reuse the floor's own vertices): then they move with it, or their edges would no longer line up with the floor under them.
+        const bool followsGeometry = c.semi && !isMatched[i] && n == 3;
+        if (c.semi && !isMatched[i] && !followsGeometry) continue;
         if (n == 0) {   // no corner in common with a matched triangle: take the movement of the matched ones around it, nearest first
             const float cx = (c.x[0] + c.x[1] + c.x[2]) / 3.0f - float(cur.ox), cy = (c.y[0] + c.y[1] + c.y[2]) / 3.0f - float(cur.oy);
             float sx = 0, sy = 0, sw = 0;
@@ -241,17 +251,32 @@ void FrameInterpolator::build(float t, std::vector<GpuCmd>& out, std::vector<std
                         sx += nb.dx * w; sy += nb.dy * w; sw += w;
                     }
                 }
-            if (sw > 0) for (int v = 0; v < 3; ++v) { o.x[v] += sx / sw * t; o.y[v] += sy / sw * t; }
+            if (sw > 0) for (int v = 0; v < 3; ++v) { vdisp[i][size_t(2 * v)] = sx / sw; vdisp[i][size_t(2 * v + 1)] = sy / sw; }
             continue;
         }
-        if (isMatched[i]) {   // all three corners move on their own, the way the partner shows
-            for (int v = 0; v < 3; ++v) { o.x[v] += dv[v][0] * t; o.y[v] += dv[v][1] * t; }
+        if (isMatched[i] || followsGeometry) {   // all three corners move on their own, the way the partner shows
+            for (int v = 0; v < 3; ++v) { vdisp[i][size_t(2 * v)] = dv[v][0]; vdisp[i][size_t(2 * v + 1)] = dv[v][1]; }
         } else {              // no partner: move as a whole, with the average of the corners it shares with others, so its shape is kept
-            for (int v = 0; v < 3; ++v) { o.x[v] += mx / float(n) * t; o.y[v] += my / float(n) * t; }
+            for (int v = 0; v < 3; ++v) { vdisp[i][size_t(2 * v)] = mx / float(n); vdisp[i][size_t(2 * v + 1)] = my / float(n); }
         }
+        vgrow[i] = 1;
+    }
+    cachedStats = local;
+}
+
+void FrameInterpolator::build(float t, std::vector<GpuCmd>& out, std::vector<std::string>& texts, Stats* stats) const {
+    if (!prepared) prepare();
+    out = cur.cmds;
+    texts = cur.texts;
+    for (const auto& m : textMoves) { GpuCmd& o = out[size_t(m[0])]; o.x[0] += m[1] * t; o.y[0] += m[2] * t; }
+    for (size_t i = 0; i < out.size(); ++i) {
+        GpuCmd& o = out[i];
+        if (o.kind != GpuCmd::Kind::Tri) continue;
+        const auto& d = vdisp[i];
+        for (int v = 0; v < 3; ++v) { o.x[v] += d[size_t(2 * v)] * t; o.y[v] += d[size_t(2 * v + 1)] * t; }
         // Neighbours that moved by different amounts can leave a hairline between them (the real picture shows through as a dark thread): opaque triangles are
         // made a little bigger (grow) so they overlap by that much. Blended ones are left alone, they would be blended twice.
-        if (grow > 0.0f && t > 0.0f && !o.semi && o.alpha == 255) {
+        if (vgrow[i] && grow > 0.0f && t > 0.0f && !o.semi && o.alpha == 255) {
             const float cx = (o.x[0] + o.x[1] + o.x[2]) / 3.0f, cy = (o.y[0] + o.y[1] + o.y[2]) / 3.0f;
             for (int v = 0; v < 3; ++v) {
                 const float dx = o.x[v] - cx, dy = o.y[v] - cy, len = std::sqrt(dx * dx + dy * dy);
@@ -259,6 +284,7 @@ void FrameInterpolator::build(float t, std::vector<GpuCmd>& out, std::vector<std
             }
         }
     }
-    if (stats) *stats = local;
+    if (stats) *stats = cachedStats;
 }
+
 }  // namespace psx

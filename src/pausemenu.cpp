@@ -57,7 +57,7 @@ void PauseMenu::setPage(Page p) {
 std::vector<PauseMenu::Item> PauseMenu::items() const {
     switch (page) {
     case Page::Main: {
-        std::vector<Item> v = {kResume, kSound};
+        std::vector<Item> v = {kResume, kSound, kGraphics};
         if (ctx.online) v.push_back(kOnline);
         v.push_back(kRecords);
         v.push_back(kControls);
@@ -65,7 +65,8 @@ std::vector<PauseMenu::Item> PauseMenu::items() const {
         v.push_back(kQuit);
         return v;
     }
-    case Page::Sound: return {kVolume, kFilter, kTextures, kFullscreen, kSmooth, kVsync, kTimer, kBack};
+    case Page::Sound: return {kVolume, kFilter, kFullscreen, kTimer, kBack};
+    case Page::Graphics: return {kTextures, kPerspective, kWide, kSmooth, kVsync, kBack};
     case Page::Online: return {kTags, kOpacity, kRoster, kBack};
     default: return {};
     }
@@ -89,6 +90,8 @@ void PauseMenu::adjust(Item item, int d) {
     case kRoster: s->roster = !s->roster; changed = true; break;
     case kTimer: s->timer = !s->timer; changed = true; break;
     case kTextures: s->textures = 1 - s->textures; changed = true; break;
+    case kPerspective: s->perspective = !s->perspective; changed = true; break;
+    case kWide: s->widescreen = !s->widescreen; changed = true; break;
     case kSmooth: s->smooth = !s->smooth; changed = true; break;
     case kVsync: s->vsync = !s->vsync; changed = true; break;
     default: break;
@@ -108,13 +111,14 @@ void PauseMenu::activate(Item item) {
     switch (item) {
     case kResume: close(); break;
     case kSound: setPage(Page::Sound); break;
+    case kGraphics: setPage(Page::Graphics); break;
     case kOnline: setPage(Page::Online); break;
     case kRecords: setPage(Page::Records); recordTop = 0; break;
     case kControls: setPage(Page::Controls); controlsSel = 0; column = 0; break;
     case kMainMenu: mainSel = sel; page = Page::ConfirmMenu; confirmSel = 1; break;
     case kQuit: mainSel = sel; page = Page::ConfirmQuit; confirmSel = 1; break;
     case kBack: setPage(Page::Main); break;
-    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: case kTextures: adjust(item, 1); break;
+    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: case kTextures: case kPerspective: case kWide: adjust(item, 1); break;
     default: break;
     }
 }
@@ -303,9 +307,9 @@ void PauseMenu::draw(double t) {
     };
 
     std::string hint;
-    const bool listPage = page == Page::Main || page == Page::Sound || page == Page::Online;
+    const bool listPage = page == Page::Main || page == Page::Sound || page == Page::Graphics || page == Page::Online;
     if (listPage) {
-        const char* heading = page == Page::Main ? "PAUSED" : page == Page::Sound ? "SOUND AND PICTURE" : "ONLINE";
+        const char* heading = page == Page::Main ? "PAUSED" : page == Page::Sound ? "SOUND AND PICTURE" : page == Page::Graphics ? "GRAPHICS" : "ONLINE";
         canvas.centred(heading, 38, page == Page::Main ? 54 : 44, kGold1, kGold2);
         const auto list = items();
         sel = std::min(sel, int(list.size()) - 1);
@@ -319,6 +323,7 @@ void PauseMenu::draw(double t) {
             switch (list[i]) {
             case kResume: centredRow(idx, y, on, "RESUME"); break;
             case kSound: centredRow(idx, y, on, "SOUND AND PICTURE"); break;
+            case kGraphics: centredRow(idx, y, on, "GRAPHICS"); break;
             case kOnline: centredRow(idx, y, on, "ONLINE"); break;
             case kRecords: centredRow(idx, y, on, "RECORDS"); break;
             case kControls: centredRow(idx, y, on, "CONTROLS"); break;
@@ -340,6 +345,8 @@ void PauseMenu::draw(double t) {
             case kFilter: valueRow(idx, y, on, "PICTURE", filterName(s->filter), kTeal); break;
             case kFullscreen: valueRow(idx, y, on, "FULLSCREEN", ctx.isFullscreen && ctx.isFullscreen() ? "ON" : "OFF", kTeal); break;
             case kTimer: valueRow(idx, y, on, "LEVEL TIMER", s->timer ? "ON" : "OFF", kTeal); break;
+            case kWide: valueRow(idx, y, on, "WIDESCREEN", s->widescreen ? "ON" : "OFF", kTeal); break;
+            case kPerspective: valueRow(idx, y, on, "PERSPECTIVE", s->perspective ? "ON" : "OFF", kTeal); break;
             case kTextures: valueRow(idx, y, on, "TEXTURES", s->textures ? "SMOOTH" : "SHARP", kTeal); break;
             case kSmooth: valueRow(idx, y, on, "60 FPS SMOOTHING", s->smooth ? "ON" : "OFF", kTeal); break;
             case kVsync: valueRow(idx, y, on, "VSYNC", s->vsync ? "ON" : "OFF", kTeal); break;

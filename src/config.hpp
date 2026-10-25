@@ -15,6 +15,10 @@
 //   textures = sharp                   sharp: texels as the console shows them; smooth: bilinear texture filtering (Esc menu: Sound and picture)
 //   disc_speed = 16                    how many times faster than the console's drive the game's disc reads are (1 = authentic, loads take seconds; max 24)
 //   reverb  = on                       the console's sound reverb (off: dry sound)
+//   refresh_rate = 0                   your monitor's refresh rate for 60 fps smoothing (0 = ask the monitor). From about 90 Hz up, every refresh shows a picture
+//                                      interpolated for that exact moment (160 Hz monitors: 160 distinct pictures a second, no judder); the cost is one more frame of delay
+//   perspective = off                  perspective-correct texturing: textures stop swimming on floors and walls (uses the GTE depth, like DuckStation's PGXP)
+//   widescreen = off                   show the picture at the window's aspect ratio (16:9 ...) instead of 4:3: 3D is squeezed and stretched back, the HUD keeps its shape
 //   vsync   = on                       wait for the monitor's refresh when showing a picture (no tearing)
 //   roster  = on                       the list of players at the right edge (F3 toggles it in game)
 //   key_cross = Z                      keyboard bindings: key_up/down/left/right/cross/square/circle/triangle/l1/r1/l2/r2/start/select
@@ -50,6 +54,9 @@ struct Config {
     int textures = 0;          // 0 sharp (the console's own look), 1 smooth (bilinear)
     int discSpeed = 16;        // emulated disc drive speed-up: area and level loads take a fraction of a second (1 = as slow as the console)
     bool reverb = true;        // SPU reverb in the mix
+    int refreshRate = 0;       // 0 = the monitor's own
+    bool perspective = false;  // perspective-correct texturing
+    bool widescreen = false;   // wide picture
     bool vsync = true;         // swap with the monitor's refresh
     bool update = true;        // look for a newer release (see updater.hpp); update = off disables it
     bool lobby = true;         // show the online lobby before the game starts (lobby = off disables it)

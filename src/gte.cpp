@@ -154,7 +154,7 @@ struct Exec {
         if (pgxp) {
             auto clampf = [](double v) { return float(v < -1024.0 ? -1024.0 : (v > 1023.99998 ? 1023.99998 : v)); };
             if (pgxp->size() > (1u << 18)) pgxp->clear();
-            (*pgxp)[d[14]] = {clampf(double(x) / 65536.0), clampf(double(y) / 65536.0)};
+            (*pgxp)[d[14]] = {clampf(double(x) / 65536.0), clampf(double(y) / 65536.0), float(d[19] & 0xFFFF)};
         }
         if (samples) {
             GteSample s{{c[0], c[1], c[2], c[3], c[4]}, {int32_t(c[5]), int32_t(c[6]), int32_t(c[7])}, float(double(x) / 65536.0), float(double(y) / 65536.0), float(d[19] & 0xFFFF)};

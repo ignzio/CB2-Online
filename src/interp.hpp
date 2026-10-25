@@ -6,6 +6,7 @@
 //
 // Frames are delimited by the display flips (Gpu::Kind::Flip): what was drawn between two flips is the picture the second flip puts on screen.
 // Frames that contain framebuffer uploads (videos, loading pictures, render-to-texture effects) are never interpolated.
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -53,6 +54,13 @@ public:
 
 private:
     Frame acc, cur, prev;
+    // the matching of cur against prev, made once per flip (prepare) and used by every build()
+    mutable bool prepared = false;
+    mutable std::vector<std::array<float, 6>> vdisp;   // per triangle of cur: movement of each corner (dx0 dy0 dx1 dy1 dx2 dy2)
+    mutable std::vector<uint8_t> vgrow;
+    mutable std::vector<std::array<float, 3>> textMoves;   // (index in cur, dx, dy)
+    mutable Stats cachedStats;
+    void prepare() const;
     bool havePrev = false, flipped = false, started = false;
     uint32_t lastFlipAt = 0;
     uint32_t period = 0;   // vertical blanks between the last two flips

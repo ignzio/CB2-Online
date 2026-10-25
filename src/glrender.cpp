@@ -17,17 +17,19 @@ layout(location=2) in vec3 col;
 layout(location=3) in ivec4 a;
 layout(location=4) in ivec4 b;
 layout(location=5) in vec4 bounds;
-out vec2 vUv; out vec3 vCol; flat out ivec4 vA; flat out ivec4 vB; flat out vec4 vBounds;
+layout(location=6) in float w;
+out vec2 vUv; noperspective out vec3 vCol; flat out ivec4 vA; flat out ivec4 vB; flat out vec4 vBounds;
 void main() {
     vUv = uv; vCol = col; vA = a; vB = b; vBounds = bounds;
-    gl_Position = vec4(pos.x / 1024.0 * 2.0 - 1.0, pos.y / 512.0 * 2.0 - 1.0, 0.0, 1.0);
+    // w is the polygon's depth (1 where unknown): the position is multiplied by it so that the hardware interpolates the texture coordinates perspective-correctly
+    gl_Position = vec4((pos.x / 1024.0 * 2.0 - 1.0) * w, (pos.y / 512.0 * 2.0 - 1.0) * w, 0.0, w);
 }
 )";
 
 // a = (page x, page y, depth, flags: 1 textured, 2 raw, 4 opaque texels only, 8 semi-transparent texels only, bits 16..23 opacity 1..254 (0 = solid))
 // b = (clut x, clut y, window mask x | y << 8, window offset x | y << 8)
 const char* kMainFrag = R"(#version 330 core
-in vec2 vUv; in vec3 vCol; flat in ivec4 vA; flat in ivec4 vB; flat in vec4 vBounds;
+in vec2 vUv; noperspective in vec3 vCol; flat in ivec4 vA; flat in ivec4 vB; flat in vec4 vBounds;
 out vec4 o;
 uniform usampler2D vram;
 uniform int texFilter;   // 0 nearest (the console's own look), 1 bilinear
@@ -103,6 +105,19 @@ uniform sampler2D tex; uniform vec4 region; // normalised sub-rectangle of the u
 void main() { o = vec4(texture(tex, region.xy + uv * region.zw).rgb, 1.0); }
 )";
 
+const char* kCompositeFrag = R"(#version 330 core
+in vec2 uv; out vec4 o;
+uniform sampler2D mid; uniform sampler2D real; uniform vec4 region;
+void main() {
+    vec2 q = region.xy + uv * region.zw;
+    vec3 m = texture(mid, q).rgb, r = texture(real, q).rgb;
+    float lm = m.r + m.g + m.b, lr = r.r + r.g + r.b;
+    // a gap (nothing drew, or a dark backdrop polygon that the moved scenery no longer covers) is dark in the in-between picture but not in the real one
+    bool gap = (lm < 0.07 && lr >= 0.07) || (lm < 0.42 && lr > 1.0 && lm < 0.3 * lr);
+    o = vec4(gap ? r : m, 1.0);
+}
+)";
+
 GLuint compile(GLenum type, const char* src) {
     const GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
@@ -135,6 +150,7 @@ bool HiResRenderer::init(int scale) {
     scaleFactor = std::max(1, std::min(scale, 8));
     mainProg = program(kMainVert, kMainFrag);
     blitProg = program(kBlitVert, kBlitFrag);
+    compProg = program(kBlitVert, kCompositeFrag);
     mainVram = glGetUniformLocation(mainProg, "vram");
     mainFilter = glGetUniformLocation(mainProg, "texFilter");
     blitRect = glGetUniformLocation(blitProg, "rect");
@@ -179,6 +195,7 @@ bool HiResRenderer::init(int scale) {
     glEnableVertexAttribArray(3); glVertexAttribIPointer(3, 4, GL_INT, stride, reinterpret_cast<void*>(offsetof(Vertex, a)));
     glEnableVertexAttribArray(4); glVertexAttribIPointer(4, 4, GL_INT, stride, reinterpret_cast<void*>(offsetof(Vertex, b2)));
     glEnableVertexAttribArray(5); glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(offsetof(Vertex, bounds)));
+    glEnableVertexAttribArray(6); glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(offsetof(Vertex, w)));
     glGenVertexArrays(1, &blitVao);
     return ok;
 }
@@ -212,7 +229,29 @@ void HiResRenderer::flush() {
     batch.clear();
 }
 
-void HiResRenderer::pushTri(const GpuCmd& c, int passFlag) {
+void HiResRenderer::widen(GpuCmd& c) const {
+    const float left = float(c.area[0]), width = float(c.area[2] - c.area[0] + 1);
+    if (width < 250.0f) return;   // render-to-texture work, not a picture for the screen
+    const float cx = left + width * 0.5f, f = wide;
+    if (c.w[0] > 1.0f) {   // 3D: the GTE gave a depth for every corner
+        for (int i = 0; i < 3; ++i) c.x[i] = cx + (c.x[i] - cx) * f;
+        return;
+    }
+    const float lo = std::min({c.x[0], c.x[1], c.x[2]}), hi = std::max({c.x[0], c.x[1], c.x[2]});
+    if (hi - lo > 0.6f * width) return;   // a backdrop or a fade: it fills the stretched picture as it is
+    // 2D: a map that squeezes the outer quarters by f (where the HUD lives) and stretches the middle to make up for it, so it stays continuous across the polygons of one element
+    const float A = width * 0.25f, s = (width - 2.0f * A * f) / (width - 2.0f * A);
+    for (int i = 0; i < 3; ++i) {
+        const float x = c.x[i] - left;
+        const float m = x <= A ? x * f : x >= width - A ? width - (width - x) * f : A * f + (x - A) * s;
+        c.x[i] = left + m;
+    }
+}
+
+void HiResRenderer::pushTri(const GpuCmd& c0, int passFlag) {
+    GpuCmd wc;
+    if (wide < 0.999f) { wc = c0; widen(wc); }
+    const GpuCmd& c = wide < 0.999f ? wc : c0;
     for (int i = 0; i < 3; ++i) {
         Vertex v{};
         v.x = c.x[i]; v.y = c.y[i]; v.u = c.u[i]; v.v = c.v[i];
@@ -223,6 +262,7 @@ void HiResRenderer::pushTri(const GpuCmd& c, int passFlag) {
         v.b2[2] = c.twMX | (c.twMY << 8);
         v.b2[3] = c.twOX | (c.twOY << 8);
         v.bounds[0] = std::min({c.u[0], c.u[1], c.u[2]}); v.bounds[1] = std::min({c.v[0], c.v[1], c.v[2]});
+        v.w = perspective ? c.w[i] : 1.0f;
         v.bounds[2] = std::max({c.u[0], c.u[1], c.u[2]}); v.bounds[3] = std::max({c.v[0], c.v[1], c.v[2]});
         batch.push_back(v);
     }
@@ -276,6 +316,7 @@ void HiResRenderer::render(Gpu& gpu) {
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RED_INTEGER, GL_UNSIGNED_SHORT, gpu.vram.data());
 
     textHres = gpu.hres;
+    gpuAreaLeft = float(gpu.displayX); gpuAreaWidth = float(gpu.hres);
     replay(gpu.cmds, gpu.textPool, &gpu.cmdPool);
 
     glDisable(GL_BLEND);
@@ -287,8 +328,12 @@ void HiResRenderer::render(Gpu& gpu) {
 }
 
 // An in-between picture (see interp.hpp): the same replay into a second target, with the VRAM texture as the last render() left it.
-void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& texts, int hres) {
+void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& texts, int hres, int vres, int displayX, int displayY) {
     textHres = hres;
+    gpuAreaLeft = float(displayX); gpuAreaWidth = float(hres);
+    // Only the part of the target that is on screen is cleared, copied and composed: the whole texture is 16 times larger than the picture and touching it all took 8 ms.
+    const int rx = std::max(0, displayX * scaleFactor - 2), ry = std::max(0, displayY * scaleFactor - 2);
+    const int rw = std::min(textureWidth() - rx, hres * scaleFactor + 4), rh = std::min(textureHeight() - ry, vres * scaleFactor + 4);
     if (!midFbo) {
         glGenTextures(1, &midTex);
         glBindTexture(GL_TEXTURE_2D, midTex);
@@ -300,43 +345,48 @@ void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector
         glGenFramebuffers(1, &midFbo);
         glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, midTex, 0);
-        // a stencil buffer remembers which pixels any triangle has drawn
-        glGenRenderbuffers(1, &midStencil);
-        glBindRenderbuffer(GL_RENDERBUFFER, midStencil);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, textureWidth(), textureHeight());
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, midStencil);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
     glViewport(0, 0, textureWidth(), textureHeight());
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
-    glDisable(GL_SCISSOR_TEST);
-    glStencilMask(0xFF);
-    glClearColor(0, 0, 0, 1);
-    glClearStencil(0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     glEnable(GL_SCISSOR_TEST);
-    glEnable(GL_STENCIL_TEST);
-    glStencilFunc(GL_ALWAYS, 1, 0xFF);
-    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    glScissor(rx, ry, rw, rh);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, vramTex);
     replay(cmds, texts, nullptr);
     glDisable(GL_BLEND);
     glDisable(GL_SCISSOR_TEST);
-    // Where the moved triangles left a gap (a pixel nothing drew), the real picture shows through instead of black. Pixels that were drawn are left alone:
-    // semi-transparent triangles must be blended once, onto what is really behind them, not onto a copy of the finished frame.
-    glStencilFunc(GL_EQUAL, 0, 0xFF);
-    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-    glUseProgram(blitProg);
+    // Where the moved triangles left a gap, the picture is black (a pixel nothing drew, or a black backdrop polygon the scenery above it no longer covers): take the real
+    // picture there. Copy the result aside first, then compose the two into the target.
+    if (!tmpFbo) {
+        glGenTextures(1, &tmpTex);
+        glBindTexture(GL_TEXTURE_2D, tmpTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, textureWidth(), textureHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glGenFramebuffers(1, &tmpFbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, tmpFbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tmpTex, 0);
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, midFbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, tmpFbo);
+    glBlitFramebuffer(rx, ry, rx + rw, ry + rh, rx, ry, rx + rw, ry + rh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
+    glUseProgram(compProg);
     glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tmpTex);
+    glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, colorTex);
-    glUniform1i(blitTex, 0);
-    glUniform4f(blitRect, 0.0f, 0.0f, 1024.0f, 512.0f);
-    glUniform4f(glGetUniformLocation(blitProg, "region"), 0.0f, 0.0f, 1.0f, 1.0f);
+    glUniform1i(glGetUniformLocation(compProg, "mid"), 0);
+    glUniform1i(glGetUniformLocation(compProg, "real"), 1);
+    glUniform4f(glGetUniformLocation(compProg, "rect"), float(rx) / float(scaleFactor), float(ry) / float(scaleFactor), float(rw) / float(scaleFactor), float(rh) / float(scaleFactor));
+    glUniform4f(glGetUniformLocation(compProg, "region"), float(rx) / float(textureWidth()), float(ry) / float(textureHeight()), float(rw) / float(textureWidth()), float(rh) / float(textureHeight()));
     glBindVertexArray(blitVao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    glDisable(GL_STENCIL_TEST);
+    glActiveTexture(GL_TEXTURE0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 void HiResRenderer::replay(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& texts, const std::vector<uint16_t>* pool) {
@@ -370,7 +420,10 @@ void HiResRenderer::replay(const std::vector<GpuCmd>& cmds, const std::vector<st
             // glyph pixels are square on the 4:3 picture whatever the console's horizontal resolution
             const float px = std::max(1.0f, float(textHres) / 320.0f), py = 1.0f;
             const float w = (float(s.size()) * 6.0f + 1.0f) * px, h = 9.0f * py;
-            const float x0 = c.x[0] - w * 0.5f, y0 = c.y[0] - h;
+            // a name tag is anchored to a 3D position: it moves as 3D geometry does (its text is not squeezed)
+            float tagX = c.x[0];
+            if (wide < 0.999f && gpuAreaWidth > 250.0f) tagX = gpuAreaLeft + gpuAreaWidth * 0.5f + (tagX - (gpuAreaLeft + gpuAreaWidth * 0.5f)) * wide;
+            const float x0 = tagX - w * 0.5f, y0 = c.y[0] - h;
             pushQuad(x0 - 1, y0 - 1, x0 + w + 1, y0 + h + 1, 0x000000);
             pushQuad(x0, y0, x0 + w, y0 + h, 0x20182C);
             for (size_t i = 0; i < s.size(); ++i) {

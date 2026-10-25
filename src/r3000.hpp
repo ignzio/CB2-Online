@@ -17,7 +17,7 @@ struct OutOfBudget {};
 
 // Unrounded screen positions of GTE-projected vertices, keyed by the packed (x | y << 16) value the GTE pushed. Used by
 // renderers that draw at a higher resolution than the PS1 grid ("precise geometry"); null when not needed.
-using PgxpMap = std::unordered_map<uint32_t, std::array<float, 2>>;
+using PgxpMap = std::unordered_map<uint32_t, std::array<float, 3>>;   // x, y and the depth (SZ) the GTE projected the vertex with
 
 constexpr uint32_t kRamSize = 0x200000;        // 2 MiB main RAM, mirrored through the first 8 MiB
 constexpr uint32_t kScratchBase = 0x1F800000;  // 1 KiB scratchpad (4 KiB are modelled so tests can map whole pages)
