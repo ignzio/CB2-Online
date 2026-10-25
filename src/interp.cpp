@@ -100,7 +100,7 @@ void FrameInterpolator::build(float t, std::vector<GpuCmd>& out, std::vector<std
     std::vector<Match> matches;
     std::unordered_map<uint64_t, std::vector<uint32_t>> curBy, prevBy;
     Stats local;
-    for (uint32_t i = 0; i < cur.cmds.size(); ++i) if (cur.cmds[i].kind == GpuCmd::Kind::Tri) { curBy[keyOf(cur.cmds[i])].push_back(i); ++local.triangles; }
+    for (uint32_t i = 0; i < cur.cmds.size(); ++i) if (cur.cmds[i].kind == GpuCmd::Kind::Tri) { curBy[keyOf(cur.cmds[i])].push_back(i); ++local.triangles; if (cur.cmds[i].semi) ++local.semi; }
     for (uint32_t i = 0; i < prev.cmds.size(); ++i) if (prev.cmds[i].kind == GpuCmd::Kind::Tri) prevBy[keyOf(prev.cmds[i])].push_back(i);
 
     struct Pair { float cost; uint32_t ci, pi; float d[3][2]; };
@@ -136,6 +136,9 @@ void FrameInterpolator::build(float t, std::vector<GpuCmd>& out, std::vector<std
                     spread = std::max(spread, std::fabs(pr.d[v][0] - mx) + std::fabs(pr.d[v][1] - my));
                     move = std::max(move, std::fabs(pr.d[v][0]) + std::fabs(pr.d[v][1]));
                 }
+                // Effects drawn see-through (water surfaces, whirlpools, glass, smoke, shadows) are meshes whose corners swirl and morph; a partner found for one of them is often a
+                // look-alike a few triangles away and the half-way shape is garbage (shards). They are only moved when they translate almost rigidly.
+                if (c.semi && (spread > kSemiSpread || move > 40.0f)) continue;
                 if (move <= kMaxMove && spread <= maxSpread) pairs.push_back(pr);
             }
         }
@@ -190,10 +193,24 @@ void FrameInterpolator::build(float t, std::vector<GpuCmd>& out, std::vector<std
         if (!m.alive) continue;
         ++local.matched;
         const GpuCmd& c = cur.cmds[m.curIdx];
+        if (c.semi) ++local.semiMatched;
         for (int v = 0; v < 3; ++v) field[vertexKey(c.x[v] - float(cur.ox), c.y[v] - float(cur.oy))] = {m.d[v][0], m.d[v][1]};
     }
     std::vector<uint8_t> isMatched(cur.cmds.size(), 0);
     for (const Match& m : matches) if (m.alive) isMatched[m.curIdx] = 1;
+    // the matched triangles by place (centroid and mean movement), for the ones that found no partner and share no corner with a matched one
+    constexpr float kCell = 32.0f;
+    struct Near { float x, y, dx, dy; };
+    auto cellKey = [](int gx, int gy) { return uint64_t(uint32_t(gx + 4096)) << 32 | uint32_t(gy + 4096); };
+    std::unordered_map<uint64_t, std::vector<Near>> grid;
+    for (const Match& m : matches) {
+        if (!m.alive) continue;
+        const GpuCmd& c = cur.cmds[m.curIdx];
+        Near nb;
+        nb.x = (c.x[0] + c.x[1] + c.x[2]) / 3.0f - float(cur.ox); nb.y = (c.y[0] + c.y[1] + c.y[2]) / 3.0f - float(cur.oy);
+        nb.dx = (m.d[0][0] + m.d[1][0] + m.d[2][0]) / 3.0f; nb.dy = (m.d[0][1] + m.d[1][1] + m.d[2][1]) / 3.0f;
+        grid[cellKey(int(std::floor(nb.x / kCell)), int(std::floor(nb.y / kCell)))].push_back(nb);
+    }
     for (uint32_t i = 0; i < out.size(); ++i) {
         GpuCmd& o = out[i];
         if (o.kind != GpuCmd::Kind::Tri) continue;
@@ -208,7 +225,25 @@ void FrameInterpolator::build(float t, std::vector<GpuCmd>& out, std::vector<std
             dv[v][0] = it->second[0]; dv[v][1] = it->second[1]; has[v] = true;
             mx += dv[v][0]; my += dv[v][1]; ++n;
         }
-        if (n == 0) continue;
+        if (c.semi && !isMatched[i]) continue;   // see-through effects without a trustworthy partner stay where the newest frame has them
+        if (n == 0) {   // no corner in common with a matched triangle: take the movement of the matched ones around it, nearest first
+            const float cx = (c.x[0] + c.x[1] + c.x[2]) / 3.0f - float(cur.ox), cy = (c.y[0] + c.y[1] + c.y[2]) / 3.0f - float(cur.oy);
+            float sx = 0, sy = 0, sw = 0;
+            const int gx = int(std::floor(cx / kCell)), gy = int(std::floor(cy / kCell));
+            for (int dy = -2; dy <= 2; ++dy)
+                for (int dx = -2; dx <= 2; ++dx) {
+                    const auto it = grid.find(cellKey(gx + dx, gy + dy));
+                    if (it == grid.end()) continue;
+                    for (const Near& nb : it->second) {
+                        const float dist = std::sqrt((nb.x - cx) * (nb.x - cx) + (nb.y - cy) * (nb.y - cy));
+                        if (dist > 2.0f * kCell) continue;
+                        const float w = 1.0f / (dist + 6.0f);
+                        sx += nb.dx * w; sy += nb.dy * w; sw += w;
+                    }
+                }
+            if (sw > 0) for (int v = 0; v < 3; ++v) { o.x[v] += sx / sw * t; o.y[v] += sy / sw * t; }
+            continue;
+        }
         if (isMatched[i]) {   // all three corners move on their own, the way the partner shows
             for (int v = 0; v < 3; ++v) { o.x[v] += dv[v][0] * t; o.y[v] += dv[v][1] * t; }
         } else {              // no partner: move as a whole, with the average of the corners it shares with others, so its shape is kept

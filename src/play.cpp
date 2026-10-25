@@ -750,7 +750,7 @@ int main(int argc, char** argv) {
                 hires.renderMid(midCmds, midTexts, p.gpu.hres);
                 showMid = true;
                 static const bool smoothLog = std::getenv("CB2_SMOOTHLOG") != nullptr;
-                if (smoothLog) std::printf("[smooth] frame %llu: %zu triangles, %zu matched\n", (unsigned long long)p.frames, st.triangles, st.matched);
+                if (smoothLog) std::printf("[smooth] frame %llu: %zu triangles, %zu matched, semi-transparent %zu of which matched %zu\n", (unsigned long long)p.frames, st.triangles, st.matched, st.semi, st.semiMatched);
             }
             msRender += since(renderBegan);
         }

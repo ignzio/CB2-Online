@@ -22,7 +22,7 @@ public:
         int ox = 0, oy = 0, w = 0, h = 0;   // the display area after the flip
         bool usable = true;              // false: the frame contains uploads
     };
-    struct Stats { size_t triangles = 0, matched = 0; };
+    struct Stats { size_t triangles = 0, matched = 0, semi = 0, semiMatched = 0; };
 
     // Called once per pass of the main loop with the commands recorded in it (before the renderer clears them). Returns true when a flip happened in this
     // pass: a new frame is on screen. The flips carry the number of the vertical blank they happened after, which is what the frame period is measured in.
@@ -49,7 +49,7 @@ public:
 
     // Largest distance (VRAM pixels) a vertex may have moved between two frames for the triangles to count as the same one, and the largest
     // difference between the movements of a triangle's three vertices.
-    static constexpr float kMaxMove = 80.0f, kMaxSpread = 40.0f;
+    static constexpr float kMaxMove = 80.0f, kMaxSpread = 40.0f, kSemiSpread = 4.0f;
 
 private:
     Frame acc, cur, prev;

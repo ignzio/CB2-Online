@@ -34,7 +34,7 @@ private:
     struct State { int blend = -1; int16_t area[4] = {0, 0, 1023, 511}; bool operator!=(const State& o) const; };
 
     int scaleFactor = 2, textHres = 320;
-    GLuint fbo = 0, colorTex = 0, vramTex = 0, uploadTex = 0, mainProg = 0, blitProg = 0, vao = 0, vbo = 0, blitVao = 0, midFbo = 0, midTex = 0;
+    GLuint fbo = 0, colorTex = 0, vramTex = 0, uploadTex = 0, mainProg = 0, blitProg = 0, vao = 0, vbo = 0, blitVao = 0, midFbo = 0, midTex = 0, midStencil = 0;
     std::vector<Vertex> batch;
     State cur;
     GLint blitRect = -1, blitTex = -1, mainVram = -1, mainFilter = -1;

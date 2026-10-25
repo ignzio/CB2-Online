@@ -300,25 +300,45 @@ void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector
         glGenFramebuffers(1, &midFbo);
         glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, midTex, 0);
+        // a stencil buffer remembers which pixels any triangle has drawn
+        glGenRenderbuffers(1, &midStencil);
+        glBindRenderbuffer(GL_RENDERBUFFER, midStencil);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, textureWidth(), textureHeight());
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, midStencil);
     }
-    // start from the real picture: where the moved triangles leave a gap, the picture shows through instead of black
-    glDisable(GL_SCISSOR_TEST);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, midFbo);
-    glBlitFramebuffer(0, 0, textureWidth(), textureHeight(), 0, 0, textureWidth(), textureHeight(), GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
     glViewport(0, 0, textureWidth(), textureHeight());
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glStencilMask(0xFF);
+    glClearColor(0, 0, 0, 1);
+    glClearStencil(0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     glEnable(GL_SCISSOR_TEST);
+    glEnable(GL_STENCIL_TEST);
+    glStencilFunc(GL_ALWAYS, 1, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, vramTex);
     replay(cmds, texts, nullptr);
     glDisable(GL_BLEND);
     glDisable(GL_SCISSOR_TEST);
+    // Where the moved triangles left a gap (a pixel nothing drew), the real picture shows through instead of black. Pixels that were drawn are left alone:
+    // semi-transparent triangles must be blended once, onto what is really behind them, not onto a copy of the finished frame.
+    glStencilFunc(GL_EQUAL, 0, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    glUseProgram(blitProg);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, colorTex);
+    glUniform1i(blitTex, 0);
+    glUniform4f(blitRect, 0.0f, 0.0f, 1024.0f, 512.0f);
+    glUniform4f(glGetUniformLocation(blitProg, "region"), 0.0f, 0.0f, 1.0f, 1.0f);
+    glBindVertexArray(blitVao);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisable(GL_STENCIL_TEST);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
-
 void HiResRenderer::replay(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& texts, const std::vector<uint16_t>* pool) {
     cur = State{};
     batch.clear();
