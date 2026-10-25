@@ -43,6 +43,7 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 - Keyboard, game pad (XInput / SDL mapping) and mouse; every PS1 button is **rebindable** for both keyboard and pad, side by side in the menu.
 
 **Convenience**
+- **Fast loading:** zones and levels load in a fraction of a second (the emulated disc drive is 16 times faster than the console's; `disc_speed` in `cb2.cfg`).
 - **In-game menu** (`Esc`): sound and picture, online options, records, controls, back to the main menu, quit.
 - **Automatic updates** from GitHub Releases, verified by SHA-256; your files and saves are untouched.
 - **Disc importer**: point it at your `.cue` / `.bin` / `.iso` once; it extracts what it needs.
@@ -137,6 +138,7 @@ your best time for the level you are in and your latest finish. Details, the fil
   Adds one vblank (about 17 ms) of delay; the game's own timing is unchanged. Off by default.
 - **Textures: smooth:** bilinear texture filtering in the shader, without bleeding between neighbouring textures. Default is the original sharp look.
 - **Speed:** the emulator skips the engine's idle waiting, which halves its CPU use; frame pacing and vsync are tuned for an even rhythm.
+- **Fast loading:** the emulated disc drive is 16 times faster than the console's, so a zone or level load takes 0.2-0.3 s instead of 2.5-5 s (`disc_speed = 1` in `cb2.cfg` for the authentic waits).
 
 All of it, with the reasoning and how to measure it, is in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
@@ -155,6 +157,7 @@ Everything in the menu is remembered in `cb2.cfg` next to `Crash2.exe`; the file
 | `name`, `room` | your name above your Crash; the room you meet people in |
 | `scale` | internal resolution multiplier (1-8) |
 | `volume`, `filter`, `textures`, `smooth`, `vsync`, `timer` | the *Sound and picture* page |
+| `disc_speed` | how many times faster than the console's drive the game's disc reads are (1-24, default 16) |
 | `nametags`, `opacity`, `roster` | the *Online* page |
 | `key_<button>`, `pad_<button>` | bindings |
 | `rendezvous`, `directory` | rendezvous server and lobby service (built in; set only to override) |
@@ -190,7 +193,7 @@ cmake --build build --config Release
 - Other players are shown, not solid: no collision and no shared crates or enemies.
 - The end of a level is detected through the game's own "go to the next level" request; it is verified for entering a level, and a real level end has not been
   captured yet ([docs/SPEEDRUN.md](docs/SPEEDRUN.md)). Please report a finished level that is not counted.
-- Lag while an area loads is reduced (faster disc reads, no player objects created while the disc is busy) but the original freeze was never reproduced.
+- Loads are about 15 times shorter than on a console (`disc_speed`); what remains is the game's own work. If you still see a freeze, run with `CB2_FRAMELOG=1` and send the log.
 - The game uses no CD audio, reverb, noise or pitch modulation in anything tested; reverb is implemented anyway (everb = off to leave it out), noise and pitch modulation are not.
 - Versions 0.3 and 0.4+ do not see each other online (the network format changed in 0.4).
 

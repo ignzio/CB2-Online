@@ -39,7 +39,7 @@ void CdRom::loadSector(uint32_t at) {
 void CdRom::tick(uint64_t cycles) {
     now += cycles;
     if (reading && now >= nextSector) {
-        nextSector = now + (mode & 0x80 ? kCyclesPerSector : kCyclesPerSector * 2);
+        nextSector = now + std::max<uint64_t>(1000, (mode & 0x80 ? kCyclesPerSector : kCyclesPerSector * 2) / std::max<uint32_t>(1, speedup));
         queue(0, 1, {status}, lba);
         ++lba;
     }
@@ -51,7 +51,7 @@ void CdRom::command(uint8_t cmd) {
     std::vector<uint8_t> p(params.begin(), params.end());
     if (trace) { std::printf("[cd] command %02x params:", cmd); for (uint8_t b : p) std::printf(" %02x", b); std::printf("\n"); }
     params.clear();
-    const uint64_t kFast = 20000, kSlow = 400000;
+    const uint64_t kFast = 20000, kSlow = 400000 / std::max<uint32_t>(1, speedup);
     switch (cmd) {
     case 0x01: queue(kFast, 3, {status}); break;                       // Getstat
     case 0x02:                                                         // Setloc

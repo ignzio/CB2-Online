@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <fstream>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,10 @@ private:
     mutable std::vector<Chunk> chunks;
     mutable std::map<int, std::ifstream> handles;
     mutable uint64_t stampCounter = 0;
+    // The first time the game reads from a file, a helper thread reads the whole file once so that the rest of it is in the operating system's cache by the time the
+    // game gets there (a cold disk or a virus scanner made the first read of each area stall for half a second).
+    mutable std::set<int> warmed;
+    void warm(int nodeIndex) const;
     mutable std::vector<std::pair<uint32_t, int>> extents;   // first sector of every file -> node index, sorted; built on first use
     const Chunk* chunkFor(int nodeIndex, uint32_t chunkIndex) const;
     int nodeForSector(uint32_t lba) const;

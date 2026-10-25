@@ -32,6 +32,23 @@ Frames that contain framebuffer uploads (videos, loading pictures) are never int
   real frame: the program then also reports how many pixels differ from the real picture, which must be 0; `1` is the previous frame).
   `CB2_SMOOTHLOG=1` prints how many triangles were matched for each in-between picture. `cb2_interptest` tests the matching.
 
+## Loading: the freezes between zones and levels
+
+The pauses when the game changes zone or level are the game waiting for its disc. The emulated drive used to read at the console's real double speed
+(150 sectors a second) with a 12 ms spin-up per read, so a level load took 2.5 to 5 seconds, as on a real PlayStation. Now the emulated drive is faster
+(`disc_speed = 16` in `cb2.cfg`; 1 = authentic, maximum 24). The game still reads one sector at a time through its own interrupts; only the waits are shorter.
+Measured from the moment the game opens a level to the moment Crash can move (`CB2_RUNLOG=1`, frames at 59.94 per second):
+
+| Load | `disc_speed` 1 | 4 | 8 | 16 | 24 |
+| --- | --- | --- | --- | --- | --- |
+| intro level (0x3C) | 300 frames (5.0 s) | 75 | 38 | 20 (0.33 s) | 14 |
+| level 0x1C | 148 frames (2.5 s) | 37 | - | 10 (0.17 s) | 7 |
+| warp room (0x02) | 212 frames (3.5 s) | 54 | 26 | 15 (0.25 s) | 11 |
+
+A whole level cannot simply be kept in memory: the console has 2 MiB of RAM and the engine streams level pages through it by design, so a level never fits. What
+can be removed is the waiting. What is left of a load is the game's own CPU work, which no disc setting changes. (At 32x the boot sequence was delayed, so the
+limit is 24.) The host side helps too: the first time the game reads a file, a helper thread reads the whole file once, so the operating system's cache holds it
+before the game gets there (a cold disk or a virus scanner had made the first read of each area stall for half a second).
 ## Textures (*Esc → Sound and picture → Textures*, `textures = smooth` in `cb2.cfg`)
 
 *Sharp* reads every texel as the console does (blocky when enlarged, the original look). *Smooth* filters the textures bilinearly in the renderer's

@@ -1,6 +1,7 @@
 #include "disc.hpp"
 
 #include <algorithm>
+#include <thread>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -235,12 +236,23 @@ std::string VirtualDisc::fileAt(uint32_t lba) const {
     return i < 0 ? std::string() : nodes[size_t(i)].host;
 }
 
+void VirtualDisc::warm(int nodeIndex) const {
+    const Node& n = nodes[size_t(nodeIndex)];
+    if (n.bundled || n.size < 256 * 1024 || n.size > (96u << 20) || !warmed.insert(nodeIndex).second) return;
+    std::thread([path = n.host]() {
+        std::ifstream in(path, std::ios::binary);
+        std::vector<char> block(1 << 20);
+        while (in) in.read(block.data(), std::streamsize(block.size()));   // the data is thrown away: the point is the cache
+    }).detach();
+}
+
 const VirtualDisc::Chunk* VirtualDisc::chunkFor(int nodeIndex, uint32_t chunkIndex) const {
     Chunk* oldest = nullptr;
     for (Chunk& c : chunks) {
         if (c.node == nodeIndex && c.index == chunkIndex) { c.stamp = ++stampCounter; return &c; }
         if (!oldest || c.stamp < oldest->stamp) oldest = &c;
     }
+    warm(nodeIndex);
     Chunk* slot;
     if (chunks.size() < kMaxChunks) { chunks.emplace_back(); slot = &chunks.back(); }
     else slot = oldest;

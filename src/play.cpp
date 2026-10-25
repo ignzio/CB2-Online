@@ -450,6 +450,8 @@ int main(int argc, char** argv) {
     std::vector<std::string> midTexts;
     int appliedVsync = -1;
     settings.keys.load(cfg.keyNames, cfg.padNames);
+    p.cd.speedup = uint32_t(cfg.discSpeed);
+    if (const char* ds = std::getenv("CB2_DISCSPEED")) p.cd.speedup = uint32_t(std::max(1, std::atoi(ds)));   // tests
     p.spu.reverb = cfg.reverb && !std::getenv("CB2_NOREVERB");
     psx::AudioOut audio;
     // CB2_WAV=file.wav records what the SPU produces (before the volume setting) and writes it when the game ends (tests, listening comparisons)

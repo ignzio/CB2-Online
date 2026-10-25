@@ -35,7 +35,7 @@ added, several `--mod` options stack. `--ram-mb 8|16` gives the engine heap more
 Settings can live in `cb2.cfg` (see `cb2.cfg.example`); command-line options override the file.
 
 Environment switches for diagnosing: `CB2_PERF`, `CB2_PCHIST`, `CB2_FRAMELOG` (speed, see [PERFORMANCE.md](PERFORMANCE.md)), `CB2_SMOOTHLOG` (60 fps smoothing),
-`CB2_RUNLOG` (level timer), `CB2_NOIDLESKIP`, `CB2_NOPRECISE`, `CB2_SOFTRASTER`, `CB2_HWSUMMARY` (at exit: which CD and SPU features the game really used - XA, CD-DA, reverb, noise, pitch modulation).
+`CB2_RUNLOG` (level timer), `CB2_NOIDLESKIP`, `CB2_NOPRECISE`, `CB2_SOFTRASTER`, `CB2_DISCSPEED` (disc speed-up, overrides `disc_speed`), `CB2_WAV` (record the sound), `CB2_HWSUMMARY` (at exit: which CD and SPU features the game really used - XA, CD-DA, reverb, noise, pitch modulation).
 
 ## Other tools
 
