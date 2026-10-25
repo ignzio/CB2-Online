@@ -68,6 +68,7 @@ int main(int argc, char** argv) {
     p.traceBios = trace;
     p.traceIrq = irq;
     p.cd.trace = cdTrace;
+    if (std::getenv("CB2_NOREVERB")) p.spu.reverb = false;
     p.recordHwSites = !hwSitesOut.empty();
     if (ramMb > 2) p.setRamMegabytes(ramMb);
     if (!wavOut.empty()) p.spu.sink = [&](int16_t l, int16_t r) { audioCapture.push_back(l); audioCapture.push_back(r); };

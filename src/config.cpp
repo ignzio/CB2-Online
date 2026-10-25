@@ -39,6 +39,7 @@ bool Config::load(const std::string& exeDir) {
             else if (k == "timer") timer = !(v == "off" || v == "0" || v == "no" || v == "false");
             else if (k == "textures") textures = (v == "smooth" || v == "1") ? 1 : 0;
             else if (k == "smooth") smooth = (v == "on" || v == "1" || v == "yes" || v == "true");
+            else if (k == "reverb") reverb = !(v == "off" || v == "0" || v == "no" || v == "false");
             else if (k == "vsync") vsync = !(v == "off" || v == "0" || v == "no" || v == "false");
             else if (k == "roster") roster = !(v == "off" || v == "0" || v == "no" || v == "false");
             else if (k.rfind("pad_", 0) == 0) padNames[k.substr(4)] = v;

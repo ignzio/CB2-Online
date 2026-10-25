@@ -450,8 +450,13 @@ int main(int argc, char** argv) {
     std::vector<std::string> midTexts;
     int appliedVsync = -1;
     settings.keys.load(cfg.keyNames, cfg.padNames);
+    p.spu.reverb = cfg.reverb && !std::getenv("CB2_NOREVERB");
     psx::AudioOut audio;
+    // CB2_WAV=file.wav records what the SPU produces (before the volume setting) and writes it when the game ends (tests, listening comparisons)
+    const char* wavPath = std::getenv("CB2_WAV");
+    std::vector<int16_t> wavCapture;
     if (audio.start(44100)) p.spu.sink = [&](int16_t l, int16_t r) {
+        if (wavPath) { wavCapture.push_back(l); wavCapture.push_back(r); }
         const int gain = settings.volume * settings.volume;   // 0..10000: a quadratic curve sounds more even than a linear one
         audio.push(int16_t(int(l) * gain / 10000), int16_t(int(r) * gain / 10000));
     };
@@ -924,10 +929,24 @@ int main(int argc, char** argv) {
             glfwSetWindowTitle(win, t);
         }
     }
+    if (wavPath && !wavCapture.empty()) {
+        if (FILE* f = std::fopen(wavPath, "wb")) {
+            const uint32_t bytes = uint32_t(wavCapture.size() * 2), rate = 44100, riff = 36 + bytes, fmtLen = 16, byteRate = rate * 4;
+            const uint16_t ch = 2, bits = 16, align = 4, fmt = 1;
+            std::fwrite("RIFF", 1, 4, f); std::fwrite(&riff, 4, 1, f); std::fwrite("WAVEfmt ", 1, 8, f);
+            std::fwrite(&fmtLen, 4, 1, f); std::fwrite(&fmt, 2, 1, f); std::fwrite(&ch, 2, 1, f); std::fwrite(&rate, 4, 1, f);
+            std::fwrite(&byteRate, 4, 1, f); std::fwrite(&align, 2, 1, f); std::fwrite(&bits, 2, 1, f);
+            std::fwrite("data", 1, 4, f); std::fwrite(&bytes, 4, 1, f);
+            std::fwrite(wavCapture.data(), 2, wavCapture.size(), f);
+            std::fclose(f);
+            std::printf("audio written to %s (%zu frames)\n", wavPath, wavCapture.size() / 2);
+        }
+    }
     if (std::getenv("CB2_HWSUMMARY")) {   // which hardware features the game really used: decides what the console layer still needs
         std::printf("[hw] frames %llu, CD sectors %llu, Setmode bits ever set %02x (bit6 = XA-ADPCM, bit0 = CD-DA), Setfilter x%llu, Pause x%llu, Play(CD-DA) x%llu\n", (unsigned long long)p.frames, (unsigned long long)p.cd.sectorsRead, p.cd.modesSet, (unsigned long long)p.cd.commandsSeen[0x0D], (unsigned long long)p.cd.commandsSeen[0x09], (unsigned long long)p.cd.commandsSeen[0x03]);
         uint64_t reverbWrites = 0, reverbRegs = 0;
         for (const auto& [a, n] : p.ioWrites) if (a >= 0x1F801DC0 && a < 0x1F801E00) { reverbWrites += n; ++reverbRegs; }
+        std::printf("[hw] SPU registers now: SPUCNT %04x, mBASE %04x, EON %04x%04x, vLIN %04x vRIN %04x, vLOUT %04x vROUT %04x, vCOMB %04x %04x %04x %04x, vAPF %04x %04x, vIIR %04x vWALL %04x, main volume %04x %04x\n", p.spu.reg(0x1AA), p.spu.reg(0x1A2), p.spu.reg(0x19A), p.spu.reg(0x198), p.spu.reg(0x1FC), p.spu.reg(0x1FE), p.spu.reg(0x184), p.spu.reg(0x186), p.spu.reg(0x1C6), p.spu.reg(0x1C8), p.spu.reg(0x1CA), p.spu.reg(0x1CC), p.spu.reg(0x1D0), p.spu.reg(0x1D2), p.spu.reg(0x1C4), p.spu.reg(0x1CE), p.spu.reg(0x180), p.spu.reg(0x182));
         auto w = [&](uint32_t a) { const auto it = p.ioWrites.find(a); return it == p.ioWrites.end() ? 0ull : (unsigned long long)it->second; };
         std::printf("[hw] SPU: reverb parameter registers written %llu times (%llu different), reverb work area (1DA2) x%llu, voice reverb-on (1D98/1D9A) x%llu/%llu, SPUCNT (1DAA) x%llu, CD volume (1DB0/1DB2) x%llu/%llu, noise-mode (1D94/1D96) x%llu/%llu, pitch-mod (1D90/1D92) x%llu/%llu\n", reverbWrites, reverbRegs, w(0x1F801DA2), w(0x1F801D98), w(0x1F801D9A), w(0x1F801DAA), w(0x1F801DB0), w(0x1F801DB2), w(0x1F801D94), w(0x1F801D96), w(0x1F801D90), w(0x1F801D92));
     }

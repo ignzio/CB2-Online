@@ -67,14 +67,14 @@ next/previous level, `F` reframe, `Esc` quit.
 | Platform layer | The game boots, plays the intro and reaches gameplay with controls, audio and rendering. Details in [PLATFORM.md](PLATFORM.md), [ARCHITECTURE.md](ARCHITECTURE.md) |
 | R3000 + GTE | R3000 verified against Unicorn; the GTE passes all 1,150 captures taken from real hardware (22 commands) |
 | GPU | Software rasteriser into a 1024x512 VRAM keeps the console's exact VRAM; an OpenGL backend replays the same draw commands at up to 8x resolution with unrounded GTE vertex positions |
-| SPU | ADPCM voices, ADSR, loops, key on/off, ENDX, RAM transfers; no reverb, noise or pitch modulation yet |
+| SPU | ADPCM voices, ADSR, loops, key on/off, ENDX, RAM transfers, and the reverb (cb2_spureverbtest; the original formula at 22.05 kHz, without the hardware's input/output FIR filters). Crash 2 itself never enables reverb, noise or pitch modulation in any scene tested (CB2_HWSUMMARY), so these cannot be compared against the game's real sound; noise and pitch modulation are not implemented |
 | CD-ROM | Controller registers, ReadN/Setloc/GetID over an ISO9660 volume synthesised from the loose files (with mod overlay) |
 | Memory card | BIOS card API and file API on a native-layout card image |
 | NSF format + C++ parser | 39 files, 2,762 chunks, 696 scenery worlds parse with no errors ([FORMAT.md](FORMAT.md)) |
 | GOOL VM | Reference VM covering all 79 opcodes, verified against the game's own interpreter on 38,000 random programs with 0 mismatches ([GOOL.md](GOOL.md)) |
 | Modding | NSF/NSD writer verified byte-exact on all levels; modded NSFs load into the running game through `--mod`; GOOL assembler (453 scripts round-trip) and scenery-to-OBJ editor (696 worlds round-trip). Not written: new native code, textures/collision/entity/model authoring |
 
-Not done yet: SPU reverb, XA/CD audio, a GOOL-to-C++ decompiler, pixel-exact GPU comparison against hardware.
+Not done yet: a GOOL-to-C++ decompiler, pixel-exact GPU comparison against hardware (needs reference captures). The game uses no XA or CD-DA audio (no Setfilter, no CD-audio mode; the music is SPU samples), so none is implemented. CB2_WAV=file.wav records the SPU output; CB2_NOREVERB=1 / everb = off leave the reverb out.
 
 `tools/nsf_probe.py` is the Python prototype used to validate the format before the C++ port.
 

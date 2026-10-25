@@ -68,6 +68,7 @@ void Spu::write(uint32_t off, uint16_t val) {
     case 0x18A: keyOn(uint32_t(val) << 16); break;
     case 0x18C: keyOff(val); break;
     case 0x18E: keyOff(uint32_t(val) << 16); break;
+    case 0x1A2: regs[0x1F0] = uint16_t(uint32_t(val) << 3); regs[0x1F1] = uint16_t((uint32_t(val) << 3) >> 16); break;   // a new work area: the position starts at its beginning
     case 0x1A4: irqAddr = uint32_t(val) << 3; break;
     case 0x1A6: transferAddr = uint32_t(val) << 3; break;
     case 0x1A8:
@@ -162,9 +163,65 @@ void Spu::stepEnvelope(Voice& vc) {
     }
 }
 
+void Spu::reverbStep(int32_t inL, int32_t inR, int32_t& outL, int32_t& outR) {
+    const uint32_t size = uint32_t(ram.size());
+    const uint32_t base = std::min<uint32_t>(uint32_t(regs[0xD1]) << 3, size - 2);
+    const uint32_t area = size - base;
+    uint32_t cur = uint32_t(regs[0x1F0]) | uint32_t(regs[0x1F1]) << 16;
+    if (cur < base || cur >= size || (cur & 1)) cur = base;   // a fresh state, or the game moved the work area
+    const bool writing = (regs[0xD5] & 0x80) != 0;
+    auto at = [&](int32_t byteOffset) {
+        int64_t o = int64_t(cur - base) + byteOffset;
+        o %= int64_t(area);
+        if (o < 0) o += int64_t(area);
+        return base + uint32_t(o & ~1ll);
+    };
+    auto rd = [&](int32_t off) { int16_t v; std::memcpy(&v, &ram[at(off)], 2); return int32_t(v); };
+    auto wr = [&](int32_t off, int32_t v) { if (writing) { const int16_t s = clamp16(v); std::memcpy(&ram[at(off)], &s, 2); } };
+    auto R = [&](int idx) { return int32_t(int16_t(regs[idx])); };
+    auto mul = [](int32_t a, int32_t b) { return (a * b) >> 15; };
+    auto u = [&](int idx) { return int32_t(regs[idx]) << 3; };   // an address register: 8-byte units
+    const int32_t vIIR = R(0xE2), vWALL = R(0xE7), vAPF1 = R(0xE8), vAPF2 = R(0xE9);
+    const int32_t Lin = mul(R(0xFE), inL), Rin = mul(R(0xFF), inR);
+
+    // reflections from the same side and from the other side
+    const int32_t mLSAME = u(0xEA), mRSAME = u(0xEB), mLDIFF = u(0xF2), mRDIFF = u(0xF3);
+    auto reflect = [&](int32_t in, int32_t from, int32_t to) {
+        const int32_t prev = rd(to - 2);
+        const int32_t v = mul(in + mul(rd(from), vWALL) - prev, vIIR) + prev;
+        wr(to, v);
+    };
+    reflect(Lin, u(0xF0), mLSAME);   // [mLSAME] from [dLSAME]
+    reflect(Rin, u(0xF1), mRSAME);
+    reflect(Lin, u(0xF9), mLDIFF);   // [mLDIFF] from [dRDIFF]
+    reflect(Rin, u(0xF8), mRDIFF);   // [mRDIFF] from [dLDIFF]
+
+    // early echo: four taps of the buffer, per side
+    int32_t lo = mul(R(0xE3), rd(u(0xEC))) + mul(R(0xE4), rd(u(0xEE))) + mul(R(0xE5), rd(u(0xF4))) + mul(R(0xE6), rd(u(0xF6)));
+    int32_t ro = mul(R(0xE3), rd(u(0xED))) + mul(R(0xE4), rd(u(0xEF))) + mul(R(0xE5), rd(u(0xF5))) + mul(R(0xE6), rd(u(0xF7)));
+
+    // late reverb: two all-pass filters in a row
+    auto allpass = [&](int32_t x, int32_t m, int32_t d, int32_t v) {
+        x = clamp16(x - mul(v, rd(m - d)));
+        wr(m, x);
+        return mul(x, v) + rd(m - d);   // read again after the write, as in the formula (the same cell when the delay is 0)
+    };
+    lo = allpass(lo, u(0xFA), u(0xE0), vAPF1);
+    ro = allpass(ro, u(0xFB), u(0xE0), vAPF1);
+    lo = allpass(lo, u(0xFC), u(0xE1), vAPF2);
+    ro = allpass(ro, u(0xFD), u(0xE1), vAPF2);
+
+    outL = mul(clamp16(lo), R(0xC2));
+    outR = mul(clamp16(ro), R(0xC3));
+    cur += 2;
+    if (cur >= size) cur = base;
+    regs[0x1F0] = uint16_t(cur); regs[0x1F1] = uint16_t(cur >> 16);
+}
+
 void Spu::tick(uint32_t frames) {
     for (uint32_t f = 0; f < frames; ++f) {
-        int64_t l = 0, r = 0;
+        const uint32_t reverbOn = uint32_t(regs[0xCC]) | uint32_t(regs[0xCD] & 0xFF) << 16;
+        int64_t l = 0, r = 0, revL = 0, revR = 0;
         for (int i = 0; i < 24; ++i) {
             Voice& vc = v[i];
             if (vc.phase == Phase::Off) continue;
@@ -175,8 +232,10 @@ void Spu::tick(uint32_t frames) {
             double sd = 0.5 * (2.0 * p1 + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t * t * t);
             int64_t s = std::clamp<int64_t>(int64_t(sd), -32768, 32767);
             s = (s * vc.env) >> 15;
-            l += (s * volume(vc.volL)) >> 14;
-            r += (s * volume(vc.volR)) >> 14;
+            const int64_t sl = (s * volume(vc.volL)) >> 14, sr = (s * volume(vc.volR)) >> 14;
+            l += sl;
+            r += sr;
+            if (reverbOn >> i & 1) { revL += sl; revR += sr; }
             stepEnvelope(vc);
             uint32_t pitch = std::min<uint32_t>(vc.pitch, 0x3FFF);
             vc.counter += pitch;
@@ -192,6 +251,21 @@ void Spu::tick(uint32_t frames) {
                 }
                 decodeBlock(vc);
             }
+        }
+        // Reverb runs at half the output rate: the input of two samples is averaged, the result held for both. Nothing to do while it is unused.
+        if (reverb && (regs[0xE2] | regs[0xE3] | regs[0xE4] | regs[0xE5] | regs[0xE6] | regs[0xFE] | regs[0xFF] | regs[0xC2] | regs[0xC3])) {
+            const int32_t inL = clamp16(int(revL)), inR = clamp16(int(revR));
+            if (regs[0x1F2] == 0) {
+                regs[0x1F2] = 1;
+                regs[0x1F5] = uint16_t(inL); regs[0x1F6] = uint16_t(inR);   // the first of the pair: remembered
+            } else {
+                regs[0x1F2] = 0;
+                int32_t oL = 0, oR = 0;
+                reverbStep((int32_t(int16_t(regs[0x1F5])) + inL) / 2, (int32_t(int16_t(regs[0x1F6])) + inR) / 2, oL, oR);
+                regs[0x1F3] = uint16_t(int16_t(clamp16(oL))); regs[0x1F4] = uint16_t(int16_t(clamp16(oR)));
+            }
+            l += int16_t(regs[0x1F3]);
+            r += int16_t(regs[0x1F4]);
         }
         const int mainL = volume(int16_t(regs[0xC0])), mainR = volume(int16_t(regs[0xC1]));
         int16_t outL = 0, outR = 0;

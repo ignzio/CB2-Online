@@ -31,7 +31,7 @@ construction; the work is in the devices.
   by construction; an upscaling OpenGL backend is future work.
 - **SPU**: ADPCM decode, ADSR (attack/decay/sustain/release, linear and exponential), pitch, volumes, key on/off, loop
   flags and ENDX (the game polls these; without them the intro cutscene hangs), transfer address and DMA, IRQ address.
-  Not yet: reverb, noise, pitch modulation, CD audio.
+  Reverb is modelled (src/spu.cpp, original formula at 22.05 kHz; the game does not enable it). Not modelled: noise, pitch modulation, CD audio (the game uses none of these in the scenes tested).
 - **GTE**: all 22 commands plus register file behaviour, verified against 1,150 real-hardware captures
   (JaCzekanski/ps1-tests `gte/test-all`, converted by `tools/gte_tests_convert.py`, run by `cb2_gtetest`).
 

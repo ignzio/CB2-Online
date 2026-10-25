@@ -191,7 +191,7 @@ cmake --build build --config Release
 - The end of a level is detected through the game's own "go to the next level" request; it is verified for entering a level, and a real level end has not been
   captured yet ([docs/SPEEDRUN.md](docs/SPEEDRUN.md)). Please report a finished level that is not counted.
 - Lag while an area loads is reduced (faster disc reads, no player objects created while the disc is busy) but the original freeze was never reproduced.
-- Not implemented yet in the console layer: SPU reverb, XA/CD audio.
+- The game uses no CD audio, reverb, noise or pitch modulation in anything tested; reverb is implemented anyway (everb = off to leave it out), noise and pitch modulation are not.
 - Versions 0.3 and 0.4+ do not see each other online (the network format changed in 0.4).
 
 ## Legal

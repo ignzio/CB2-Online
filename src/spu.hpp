@@ -1,6 +1,6 @@
 #pragma once
 // PlayStation SPU: 24 ADPCM voices with ADSR envelopes, key on/off, loop flags (ENDX), SPU RAM transfers and IRQ.
-// Reverb, noise and CD audio mixing are not modelled yet.
+// Reverb is modelled (22.05 kHz, see reverbStep); noise, pitch modulation and CD audio mixing are not.
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -14,6 +14,8 @@ class Spu {
 public:
     std::vector<uint8_t> ram = std::vector<uint8_t>(512 * 1024, 0);
     std::function<void(int16_t, int16_t)> sink;  // receives one stereo frame at 44.1 kHz
+    uint16_t reg(uint32_t offset) const { return regs[(offset >> 1) & 0x1FF]; }   // a register as last written (tools)
+    bool reverb = true;                          // false: the reverb is left out of the mix (the game's own reverb setup is still tracked)
     bool irq = false;                            // set when the SPU IRQ address was reached; the platform clears it
     uint64_t framesProduced = 0;
 
@@ -22,6 +24,9 @@ public:
     void dmaWrite(const uint8_t* data, uint32_t bytes);
     void dmaRead(uint8_t* data, uint32_t bytes);
     void tick(uint32_t frames);
+    // One step of the reverb at 22.05 kHz: "in" is what the voices with their reverb flag set put in (sample scale), the result is the reverb's output before the
+    // output volumes vLOUT / vROUT (applied here), in the same scale. Reads and writes the reverb work area in SPU RAM (writes only while bit 7 of SPUCNT is set).
+    void reverbStep(int32_t inL, int32_t inR, int32_t& outL, int32_t& outR);
 
     bool irqEnabled() const { return (regs[0xD5] & 0x40) != 0; }
 private:
@@ -39,7 +44,8 @@ private:
         bool repeatSet = false;
     };
     Voice v[24];
-    uint16_t regs[0x200] = {};          // plain storage for registers without behaviour
+    uint16_t regs[0x200] = {};          // plain storage for registers without behaviour; the top 16 slots (offset 0x3E0 up, never used by the hardware) hold the reverb's own state
+                                        // (position in the work area, which half-rate step is next, last output, last input) so that save states need no new fields
     uint32_t transferAddr = 0;
     uint32_t irqAddr = 0;
     uint32_t endx = 0;
