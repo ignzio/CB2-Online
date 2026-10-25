@@ -39,6 +39,7 @@ static std::vector<GpuCmd> frame(int ox, float shift, int n, bool withFill = tru
 int main() {
     const std::vector<std::string> none;
     FrameInterpolator fi;
+    fi.grow = 0;   // the positions below are exact
     std::vector<GpuCmd> out;
     std::vector<std::string> texts;
 
@@ -145,6 +146,7 @@ int main() {
     // a triangle without a partner follows the corners it shares with a matched one, so no gap opens between them
     {
         FrameInterpolator f2;
+        f2.grow = 0;
         std::vector<GpuCmd> p1 = {tri(612, 100, 0)};   // the buffer at x = 512: the triangle sits at (100, 100) on screen
         p1.push_back(flip(512, 0, 40));
         f2.feed(p1, none);
@@ -158,7 +160,43 @@ int main() {
         CHECK(st.triangles == 2 && st.matched == 1);
         CHECK(std::fabs(out[0].x[1] - 113.0f) < 1e-3f);   // matched: half way back
         CHECK(std::fabs(out[1].x[0] - 113.0f) < 1e-3f);   // the neighbour's shared corner moves with it
-        CHECK(std::fabs(out[1].x[1] - 130.0f) < 1e-3f && std::fabs(out[1].x[2] - 116.0f) < 1e-3f);   // its own corners stay
+        CHECK(std::fabs(out[1].x[1] - 127.0f) < 1e-3f && std::fabs(out[1].x[2] - 113.0f) < 1e-3f);   // and its other corners come along, so its shape is kept
+            }
+
+            // two look-alike triangles (a left and a right glove): each pairs with the one that moved least, not with the one that comes first
+    {
+        FrameInterpolator f3;
+        f3.grow = 0;
+        std::vector<GpuCmd> q1 = {tri(612, 100, 0), tri(812, 100, 0)};   // prev: left at x=100, right at x=300 (buffer at 512)
+        q1.push_back(flip(512, 0, 50));
+        f3.feed(q1, none);
+        std::vector<GpuCmd> q2 = {tri(304, 100, 0), tri(104, 100, 0)};   // now drawn in the opposite order, each moved 4 pixels
+        q2.push_back(flip(0, 0, 52));
+        f3.feed(q2, none);
+        f3.build(1.0f, out, texts, &st);
+        CHECK(st.matched == 2);
+        CHECK(std::fabs(out[0].x[0] - 300.0f) < 1e-3f && std::fabs(out[1].x[0] - 100.0f) < 1e-3f);
+    }
+
+    // a wrong partner is dropped when its neighbour disagrees about a shared corner: two triangles share the corner (110,100); the first has a look-alike far away that
+    // is closer in the drawing order but farther in space... here the look-alike of B (same texture coordinates) sits 40 pixels to the right in the previous frame
+    {
+        FrameInterpolator f4;
+        f4.grow = 0;
+        GpuCmd pa = tri(612, 100, 0), pb = tri(612, 100, 40), pdecoy = tri(612, 100, 40);
+        pb.x[0] = 622; pb.y[0] = 100; pb.x[1] = 640; pb.y[1] = 100; pb.x[2] = 622; pb.y[2] = 118;      // B, shares (622,100) with A's second corner
+        for (int v = 0; v < 3; ++v) { pdecoy.x[v] = pb.x[v] + 40.0f; pdecoy.y[v] = pb.y[v] + 5.0f; }   // a look-alike of B, 40 px away
+        std::vector<GpuCmd> r1 = {pa, pdecoy, pb};
+        r1.push_back(flip(512, 0, 60));
+        f4.feed(r1, none);
+        GpuCmd ca = tri(106, 100, 0), cb = pb;
+        cb.x[0] = 116; cb.y[0] = 100; cb.x[1] = 134; cb.y[1] = 100; cb.x[2] = 116; cb.y[2] = 118;   // both moved 6 px right (ca at 106, cb at 116)
+        std::vector<GpuCmd> r2 = {ca, cb};
+        r2.push_back(flip(0, 0, 62));
+        f4.feed(r2, none);
+        f4.build(1.0f, out, texts, &st);
+        CHECK(st.matched == 2);
+        CHECK(std::fabs(out[0].x[0] - 100.0f) < 1e-3f && std::fabs(out[1].x[0] - 110.0f) < 1e-3f);   // B went to the nearer one, not the decoy
     }
 
     // text (name tags) moves with its string

@@ -44,7 +44,8 @@ public:
         if (prev.w != cur.w || prev.h != cur.h) return "display size changed";
         return "";
     }
-    void reset() { *this = FrameInterpolator(); }
+    void reset() { const float g = grow; *this = FrameInterpolator(); grow = g; }
+    float grow = 0.35f;   // opaque triangles of the in-between picture are made this many pixels bigger so neighbours overlap (no hairline gaps)
 
     // Largest distance (VRAM pixels) a vertex may have moved between two frames for the triangles to count as the same one, and the largest
     // difference between the movements of a triangle's three vertices.

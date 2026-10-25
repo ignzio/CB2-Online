@@ -156,6 +156,8 @@ int main(int argc, char** argv) {
     std::string capturePath;
     bool autoStart = false, hidden = false, interpOnly = false;   // --autostart presses Start at the title screen; --hidden hides the window
     bool windowCapture = false;
+    std::string recordDir;                       // --record DIR:EVERY:COUNT:START - save the window every EVERY frames, COUNT times, from frame START, then quit (footage for the README)
+    uint64_t recordEvery = 4, recordCount = 0, recordStart = 0, recordNext = 0, recordDone = 0;
     bool forceSmooth = false, captureMid = false;   // tests: 60 fps smoothing on from the start, and --capture saves an in-between picture
     float smoothT = 0.5f;                          // how far back towards the previous frame the in-between picture is (0 = the newest frame)
     cb2mp::Options online;                    // --online / --room / --rendezvous / --name: other players inside the game (docs/ONLINE.md)
@@ -204,6 +206,15 @@ int main(int argc, char** argv) {
             capturePath = s.substr(s.find(char(58)) + 1);
         }
         else if (!std::strcmp(argv[i], "--autostart")) autoStart = true;
+        else if (!std::strcmp(argv[i], "--record") && more) {
+            const std::string s = argv[++i];
+            std::vector<std::string> f;
+            for (size_t pos = 0; pos <= s.size();) { const size_t c = s.find(':', pos + (f.empty() && s.size() > 1 && s[1] == ':' ? 2 : 0)); f.push_back(s.substr(pos, c == std::string::npos ? std::string::npos : c - pos)); if (c == std::string::npos) break; pos = c + 1; }
+            recordDir = f[0];
+            if (f.size() > 1) recordEvery = std::max<uint64_t>(1, std::strtoull(f[1].c_str(), nullptr, 10));
+            if (f.size() > 2) recordCount = std::strtoull(f[2].c_str(), nullptr, 10);
+            if (f.size() > 3) recordStart = std::strtoull(f[3].c_str(), nullptr, 10);
+        }
         else if (!std::strcmp(argv[i], "--smooth")) forceSmooth = true;
         else if (!std::strcmp(argv[i], "--textures") && more) cfg.textures = std::strcmp(argv[++i], "smooth") == 0 || std::strcmp(argv[i], "1") == 0 ? 1 : 0;
         else if (!std::strcmp(argv[i], "--smooth-t") && more) smoothT = float(std::atof(argv[++i]));
@@ -575,6 +586,7 @@ int main(int argc, char** argv) {
             if (captureFrame) captureFrame += p.frames;
             if (saveStateFrame) saveStateFrame += p.frames;
             if (paceFrom) paceFrom += p.frames;
+            if (recordStart) recordStart += p.frames;
             if (menuAt) menuAt += p.frames;
             for (Poke& pk : pokes) pk.frame += p.frames;
             for (FakeRequest& fr : fakeRequests) fr.frame += p.frames;
@@ -851,6 +863,14 @@ int main(int argc, char** argv) {
         }
         const int wantVsync = settings.vsync && !captureFrame && !hidden ? 1 : 0;
         if (wantVsync != appliedVsync) { glfwSwapInterval(wantVsync); appliedVsync = wantVsync; }
+        if (!recordDir.empty() && recordCount && p.frames >= recordStart && p.frames >= recordNext) {
+            std::filesystem::create_directories(recordDir);
+            char name[32];
+            std::snprintf(name, sizeof name, "/f%04llu.png", (unsigned long long)recordDone);
+            saveWindow(recordDir + name, fw, fh);
+            recordNext = p.frames + recordEvery;
+            if (++recordDone >= recordCount) { std::printf("recorded %llu pictures to %s\n", (unsigned long long)recordDone, recordDir.c_str()); break; }
+        }
         const auto swapBegan = std::chrono::steady_clock::now();
         glfwSwapBuffers(win);
         glfwPollEvents();

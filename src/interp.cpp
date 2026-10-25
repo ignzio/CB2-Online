@@ -78,100 +78,152 @@ bool FrameInterpolator::feed(const std::vector<GpuCmd>& cmds, const std::vector<
 }
 
 void FrameInterpolator::build(float t, std::vector<GpuCmd>& out, std::vector<std::string>& texts, Stats* stats) const {
-    out.clear();
-    out.reserve(cur.cmds.size());
+    out = cur.cmds;
     texts = cur.texts;
-    // the previous frame's triangles by what they look like; a cursor per look moves forward through them because the drawing order is stable
-    std::unordered_map<uint64_t, std::vector<uint32_t>> byKey;
-    byKey.reserve(prev.cmds.size());
-    for (uint32_t i = 0; i < prev.cmds.size(); ++i)
-        if (prev.cmds[i].kind == GpuCmd::Kind::Tri) byKey[keyOf(prev.cmds[i])].push_back(i);
-    std::vector<uint8_t> used(prev.cmds.size(), 0);
-    std::unordered_map<uint64_t, uint32_t> cursor;
-    std::unordered_map<uint64_t, std::vector<std::array<float, 2>>> votes;
-    std::vector<uint8_t> usedText(prev.texts.size(), 0);
 
-    Stats local;
-    for (const GpuCmd& c : cur.cmds) {
-        if (c.kind == GpuCmd::Kind::Text) {
-            GpuCmd o = c;
-            for (size_t i = 0; i < prev.cmds.size(); ++i) {
-                const GpuCmd& p = prev.cmds[i];
-                if (p.kind != GpuCmd::Kind::Text || usedText[p.poolOffset] || prev.texts[p.poolOffset] != cur.texts[c.poolOffset]) continue;
-                const float dx = (p.x[0] - float(prev.ox)) - (c.x[0] - float(cur.ox)), dy = (p.y[0] - float(prev.oy)) - (c.y[0] - float(cur.oy));
+    // ---- name tags: follow the same string
+    {
+        std::vector<uint8_t> usedText(prev.texts.size(), 0);
+        for (GpuCmd& o : out) {
+            if (o.kind != GpuCmd::Kind::Text) continue;
+            for (const GpuCmd& p : prev.cmds) {
+                if (p.kind != GpuCmd::Kind::Text || usedText[p.poolOffset] || prev.texts[p.poolOffset] != cur.texts[o.poolOffset]) continue;
+                const float dx = (p.x[0] - float(prev.ox)) - (o.x[0] - float(cur.ox)), dy = (p.y[0] - float(prev.oy)) - (o.y[0] - float(cur.oy));
                 if (std::fabs(dx) + std::fabs(dy) <= kMaxMove) { o.x[0] += dx * t; o.y[0] += dy * t; usedText[p.poolOffset] = 1; }
                 break;
             }
-            out.push_back(o);
-            continue;
         }
-        if (c.kind != GpuCmd::Kind::Tri) { out.push_back(c); continue; }
-        ++local.triangles;
-        GpuCmd o = c;
-        const uint64_t key = keyOf(c);
-        const auto found = byKey.find(key);
-        if (found != byKey.end()) {
-            const std::vector<uint32_t>& list = found->second;
-            uint32_t& cur0 = cursor[key];
-            const uint32_t from = cur0 > 4 ? cur0 - 4 : 0, to = std::min<uint32_t>(uint32_t(list.size()), cur0 + 40);
-            float best = 1e30f;
-            const float maxSpread = std::min(kMaxSpread, std::max(6.0f, 0.6f * sizeOf(c)));   // a small triangle cannot have been stretched much
-            uint32_t bestAt = 0;
-            float bd[3][2] = {};
-            for (uint32_t j = from; j < to; ++j) {
-                if (used[list[j]]) continue;
-                const GpuCmd& p = prev.cmds[list[j]];
+    }
+
+    // ---- triangles: find each one's partner in the previous frame
+    struct Match { uint32_t curIdx = 0; float d[3][2] = {}; float cost = 0; bool alive = true; };
+    std::vector<Match> matches;
+    std::unordered_map<uint64_t, std::vector<uint32_t>> curBy, prevBy;
+    Stats local;
+    for (uint32_t i = 0; i < cur.cmds.size(); ++i) if (cur.cmds[i].kind == GpuCmd::Kind::Tri) { curBy[keyOf(cur.cmds[i])].push_back(i); ++local.triangles; }
+    for (uint32_t i = 0; i < prev.cmds.size(); ++i) if (prev.cmds[i].kind == GpuCmd::Kind::Tri) prevBy[keyOf(prev.cmds[i])].push_back(i);
+
+    struct Pair { float cost; uint32_t ci, pi; float d[3][2]; };
+    std::vector<Pair> pairs;
+    for (auto& [key, cl] : curBy) {
+        const auto pf = prevBy.find(key);
+        if (pf == prevBy.end()) continue;
+        const std::vector<uint32_t>& pl = pf->second;
+        pairs.clear();
+        const bool big = uint64_t(cl.size()) * pl.size() > 40000;   // many look-alikes (flat shapes): only compare those at a similar place in the drawing order
+        for (size_t a = 0; a < cl.size(); ++a) {
+            const GpuCmd& c = cur.cmds[cl[a]];
+            const float maxSpread = std::min(kMaxSpread, std::max(6.0f, 0.6f * sizeOf(c)));
+            size_t from = 0, to = pl.size();
+            if (big) {
+                const size_t mid = a * pl.size() / cl.size();
+                from = mid > 150 ? mid - 150 : 0; to = std::min(pl.size(), mid + 150);
+            }
+            for (size_t b = from; b < to; ++b) {
+                const GpuCmd& p = prev.cmds[pl[b]];
                 if (!similarShape(c, p)) continue;
-                float d[3][2], mx = 0, my = 0, cost = 0;
+                Pair pr{};
+                pr.ci = cl[a]; pr.pi = pl[b];
+                float mx = 0, my = 0;
                 for (int v = 0; v < 3; ++v) {
-                    d[v][0] = (p.x[v] - float(prev.ox)) - (c.x[v] - float(cur.ox));
-                    d[v][1] = (p.y[v] - float(prev.oy)) - (c.y[v] - float(cur.oy));
-                    mx += d[v][0] / 3; my += d[v][1] / 3;
-                    cost += std::fabs(d[v][0]) + std::fabs(d[v][1]);
+                    pr.d[v][0] = (p.x[v] - float(prev.ox)) - (c.x[v] - float(cur.ox));
+                    pr.d[v][1] = (p.y[v] - float(prev.oy)) - (c.y[v] - float(cur.oy));
+                    mx += pr.d[v][0] / 3; my += pr.d[v][1] / 3;
+                    pr.cost += std::fabs(pr.d[v][0]) + std::fabs(pr.d[v][1]);
                 }
                 float spread = 0, move = 0;
                 for (int v = 0; v < 3; ++v) {
-                    spread = std::max(spread, std::fabs(d[v][0] - mx) + std::fabs(d[v][1] - my));
-                    move = std::max(move, std::fabs(d[v][0]) + std::fabs(d[v][1]));
+                    spread = std::max(spread, std::fabs(pr.d[v][0] - mx) + std::fabs(pr.d[v][1] - my));
+                    move = std::max(move, std::fabs(pr.d[v][0]) + std::fabs(pr.d[v][1]));
                 }
-                if (move > kMaxMove || spread > maxSpread || cost >= best) continue;
-                best = cost; bestAt = j;
-                std::copy(&d[0][0], &d[0][0] + 6, &bd[0][0]);
-            }
-            if (best < 1e29f) {
-                used[list[bestAt]] = 1;
-                cur0 = bestAt + 1;
-                ++local.matched;
-                for (int v = 0; v < 3; ++v) votes[vertexKey(c.x[v] - float(cur.ox), c.y[v] - float(cur.oy))].push_back({bd[v][0], bd[v][1]});
+                if (move <= kMaxMove && spread <= maxSpread) pairs.push_back(pr);
             }
         }
-        out.push_back(o);
+        // the closest pairs first: the polygon that moved least is the likeliest partner (a left glove and a right glove have the same texture coordinates)
+        std::sort(pairs.begin(), pairs.end(), [](const Pair& x, const Pair& y) { return x.cost < y.cost; });
+        std::unordered_map<uint32_t, uint8_t> usedCur, usedPrev;
+        for (const Pair& pr : pairs) {
+            if (usedCur.count(pr.ci) || usedPrev.count(pr.pi)) continue;
+            usedCur[pr.ci] = 1; usedPrev[pr.pi] = 1;
+            Match m;
+            m.curIdx = pr.ci; m.cost = pr.cost;
+            std::copy(&pr.d[0][0], &pr.d[0][0] + 6, &m.d[0][0]);
+            matches.push_back(m);
+        }
     }
 
-    // One movement per screen vertex: the median of what the matched triangles around it found. Triangles that share a corner then always move together (a
-    // wrong partner is outvoted, and no gap opens between neighbours), and a triangle without a partner follows the corners it has in common with matched ones.
-    std::unordered_map<uint64_t, std::array<float, 2>> field;
-    field.reserve(votes.size());
-    for (auto& [key, list] : votes) {
-        std::array<float, 2> m{};
-        for (int axis = 0; axis < 2; ++axis) {
-            const size_t mid = list.size() / 2;
-            std::nth_element(list.begin(), list.begin() + long(mid), list.end(), [&](const std::array<float, 2>& a, const std::array<float, 2>& b) { return a[size_t(axis)] < b[size_t(axis)]; });
-            m[size_t(axis)] = list[mid][size_t(axis)];
+    // ---- neighbours must agree: two matched triangles that share a screen corner must have seen that corner go to the same place. When they do not, one of them
+    // has the wrong partner; the one that moved farther is the likelier culprit and is dropped (it then follows its neighbours instead).
+    constexpr float kAgree = 3.0f;
+    for (int round = 0; round < 4; ++round) {
+        std::unordered_map<uint64_t, std::vector<std::pair<uint32_t, uint8_t>>> at;   // corner -> (match, vertex)
+        for (uint32_t m = 0; m < matches.size(); ++m) {
+            if (!matches[m].alive) continue;
+            const GpuCmd& c = cur.cmds[matches[m].curIdx];
+            for (uint8_t v = 0; v < 3; ++v) at[vertexKey(c.x[v] - float(cur.ox), c.y[v] - float(cur.oy))].push_back({m, v});
         }
-        field[key] = m;
+        bool dropped = false;
+        for (auto& [key, list] : at) {
+            if (list.size() < 2) continue;
+            float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
+            for (const auto& e : list) for (int k = 0; k < 2; ++k) { lo[k] = std::min(lo[k], matches[e.first].d[e.second][k]); hi[k] = std::max(hi[k], matches[e.first].d[e.second][k]); }
+            if (hi[0] - lo[0] <= kAgree && hi[1] - lo[1] <= kAgree) continue;
+            // majority first: the movement most of the votes are near
+            uint32_t worst = list[0].first;
+            float worstScore = -1;
+            for (const auto& e : list) {
+                int friends = 0;
+                for (const auto& o : list)
+                    if (std::fabs(matches[o.first].d[o.second][0] - matches[e.first].d[e.second][0]) <= kAgree && std::fabs(matches[o.first].d[o.second][1] - matches[e.first].d[e.second][1]) <= kAgree) ++friends;
+                const float score = float(list.size() - size_t(friends)) * 1000.0f + matches[e.first].cost;   // few friends, then large movement
+                if (score > worstScore) { worstScore = score; worst = e.first; }
+            }
+            matches[worst].alive = false;
+            dropped = true;
+        }
+        if (!dropped) break;
     }
-    for (GpuCmd& o : out) {
+
+    // ---- one movement per corner (the votes of all surviving matches around it agree, so any of them will do)
+    std::unordered_map<uint64_t, std::array<float, 2>> field;
+    for (const Match& m : matches) {
+        if (!m.alive) continue;
+        ++local.matched;
+        const GpuCmd& c = cur.cmds[m.curIdx];
+        for (int v = 0; v < 3; ++v) field[vertexKey(c.x[v] - float(cur.ox), c.y[v] - float(cur.oy))] = {m.d[v][0], m.d[v][1]};
+    }
+    std::vector<uint8_t> isMatched(cur.cmds.size(), 0);
+    for (const Match& m : matches) if (m.alive) isMatched[m.curIdx] = 1;
+    for (uint32_t i = 0; i < out.size(); ++i) {
+        GpuCmd& o = out[i];
         if (o.kind != GpuCmd::Kind::Tri) continue;
-        float nx[3], ny[3];
+        const GpuCmd& c = cur.cmds[i];
+        float mx = 0, my = 0;
+        int n = 0;
+        float dv[3][2] = {};
+        bool has[3] = {};
         for (int v = 0; v < 3; ++v) {
-            nx[v] = o.x[v]; ny[v] = o.y[v];
-            const auto it = field.find(vertexKey(o.x[v] - float(cur.ox), o.y[v] - float(cur.oy)));
-            if (it != field.end()) { nx[v] += it->second[0] * t; ny[v] += it->second[1] * t; }
+            const auto it = field.find(vertexKey(c.x[v] - float(cur.ox), c.y[v] - float(cur.oy)));
+            if (it == field.end()) continue;
+            dv[v][0] = it->second[0]; dv[v][1] = it->second[1]; has[v] = true;
+            mx += dv[v][0]; my += dv[v][1]; ++n;
         }
-        for (int v = 0; v < 3; ++v) { o.x[v] = nx[v]; o.y[v] = ny[v]; }
+        if (n == 0) continue;
+        if (isMatched[i]) {   // all three corners move on their own, the way the partner shows
+            for (int v = 0; v < 3; ++v) { o.x[v] += dv[v][0] * t; o.y[v] += dv[v][1] * t; }
+        } else {              // no partner: move as a whole, with the average of the corners it shares with others, so its shape is kept
+            for (int v = 0; v < 3; ++v) { o.x[v] += mx / float(n) * t; o.y[v] += my / float(n) * t; }
+        }
+        // Neighbours that moved by different amounts can leave a hairline between them (the real picture shows through as a dark thread): opaque triangles are
+        // made a little bigger (grow) so they overlap by that much. Blended ones are left alone, they would be blended twice.
+        if (grow > 0.0f && t > 0.0f && !o.semi && o.alpha == 255) {
+            const float cx = (o.x[0] + o.x[1] + o.x[2]) / 3.0f, cy = (o.y[0] + o.y[1] + o.y[2]) / 3.0f;
+            for (int v = 0; v < 3; ++v) {
+                const float dx = o.x[v] - cx, dy = o.y[v] - cy, len = std::sqrt(dx * dx + dy * dy);
+                if (len > 1.0f) { o.x[v] += dx / len * grow; o.y[v] += dy / len * grow; }
+            }
+        }
     }
     if (stats) *stats = local;
 }
-
 }  // namespace psx

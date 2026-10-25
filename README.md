@@ -1,155 +1,200 @@
-# Crash Bandicoot 2 native PC port (C++)
+# CB2-Online
 
-Runs the original game on PC from your own game files: the original engine code and GOOL scripts execute unmodified on a
-cycle-approximate PlayStation platform layer (R3000 + exact GTE, GPU, SPU, CD-ROM, memory card, BIOS replacement),
-with an OpenGL window, audio and keyboard/gamepad input. Game data is read at runtime and never copied into this
-project; point it at your own files. Includes a level viewer, an NSF/NSD read/write library for modding, and a verified
-GOOL VM for the decompiler work. Architecture: `docs/PLATFORM.md`, `docs/ARCHITECTURE.md`.
+**Crash Bandicoot 2 with online multiplayer.** Play the original game, level by level, together with your friends: everybody who is in the same
+room appears in your game as an extra Crash with a name tag, in the same level, in real time. Add level timers and personal records, a live
+player list, 60 fps smoothing and an in-game menu, and you have a game built for racing and speedrunning together.
 
-## Install (from a release)
+<p align="center"><img src="docs/img/multiplayer.gif" alt="Four players in Snow Go" width="640"></p>
 
-1. Download `CB2-Online-v<version>.zip` from the [Releases](../../releases) page and unzip it.
-2. Run `Play.bat` (or `Crash2.exe`). The first time, the game asks for **your own disc image** of Crash Bandicoot 2 (NTSC-U,
-   `SCUS_941.54`): pick the `.cue` (or `.bin` / `.iso`) file and it copies the files it needs into the `data` folder, once. The
-   release does not contain the game (it is copyrighted, so it can't be shared here). You can also drop the `.cue`/`.iso`
-   on `Crash2.exe`, or run `Crash2.exe --import "path\to\disc.cue"`. Compressed formats (`.chd`, `.pbp`, `.ecm`) are not supported.
-   If you already have the files extracted, copy `SCUS_941.54`, `SYSTEM.CNF` and `S0`..`S3` into `data` yourself.
-3. The game keeps itself up to date from then on (see Updates below).
+> **You need your own copy of the game.** CB2-Online contains no game data: on the first start it asks for **your own disc image** of Crash Bandicoot 2
+> (NTSC-U, `SCUS_941.54`) and copies the files it needs. See [Install](#install) and [NOTICE.md](NOTICE.md).
 
-## Build (Windows, Visual Studio 2022 + CMake)
+**Contents:** [Features](#features) · [Install](#install) · [Playing online](#playing-online) · [Controls](#controls) · [In-game menu](#in-game-menu) ·
+[Level times and records](#level-times-and-records) · [Graphics and speed](#graphics-and-speed) · [Save states](#save-states) · [Settings](#settings-cb2cfg) ·
+[Updates](#updates) · [How it works](#how-it-works) · [For developers](#for-developers) · [Known limits](#known-limits) · [Legal](#legal)
+
+## Features
+
+**Multiplayer**
+- Play with friends in the **same level at the same time**: every other player is a real Crash in your game, with animation, position and a floating name tag.
+- **No host, no port forwarding, no addresses to type.** Players in a room find each other on the same PC or network automatically, or through a
+  rendezvous server on the internet; they can leave and come back at any time.
+- **Online lobby** before the game: play offline, play on your network, or play online; your name; a public list of open rooms and servers.
+- **Player list** at the right edge: who is online, which level each one is in, how long they have been in it, their best time and latest finish (`F3`).
+- **Notices** when somebody joins or leaves the room, enters or leaves a level, finishes a level or runs out of lives.
+- **Opacity slider** for the other players' Crashes (10-100%), so they do not block your view.
+- Others are shown, not solid: you do not collide with them or interact. Online, they see you standing still while your menu is open.
+
+**Speedrunning**
+- **Level timer** from the first frame Crash can move until the level ends (`F4`), in the game's own 59.94 Hz time.
+- **Personal records** per level, saved in `records.txt`; a *Records* page in the menu; new-best notices.
+- Your best time and latest finish are **shared with the room**. A server-side leaderboard is planned: [SPEEDRUN.md](docs/SPEEDRUN.md).
+- **Save states** (`F5` save, `F9` load, four slots): practise a trick without replaying the cutscenes.
+- Hold `Tab` to fast-forward.
+
+**Graphics and sound**
+- **OpenGL renderer** at up to 8x the original resolution (default 4x) with unrounded vertex positions, so the geometry does not wobble.
+- **60 fps smoothing** (optional): the game draws 30 pictures per second; this draws the pictures in between.
+- **Smooth textures** (optional): bilinear filtering instead of the blocky texels.
+- Display filters (nearest / bilinear / sharp bilinear), fullscreen, vsync, 4:3 picture whatever the window shape.
+- Volume slider; the original sound and music.
+
+**Controls**
+- Keyboard, game pad (XInput / SDL mapping) and mouse; every PS1 button is **rebindable** for both keyboard and pad, side by side in the menu.
+
+**Convenience**
+- **In-game menu** (`Esc`): sound and picture, online options, records, controls, back to the main menu, quit.
+- **Automatic updates** from GitHub Releases, verified by SHA-256; your files and saves are untouched.
+- **Disc importer**: point it at your `.cue` / `.bin` / `.iso` once; it extracts what it needs.
+- Memory card saves in the standard 128 KiB image format (`memcard0.mcr`).
+- Works as a single folder you can copy; the optional server is a separate small program for Windows and Linux.
+
+**For modders and developers**
+- Mod folders that overlay files onto the disc (`--mod`), NSF/NSD level reader and writer, a GOOL script assembler, a scenery-to-OBJ pipeline, a level
+  viewer. See [For developers](#for-developers).
+
+## Install
+
+1. Download `CB2-Online-v<version>.zip` from the [Releases](../../releases) page and unzip it anywhere.
+2. Run `Play.bat` (or `Crash2.exe`).
+3. **First start only:** the game asks for your disc image. Pick the `.cue` (or `.bin` / `.iso`) of your Crash Bandicoot 2 (NTSC-U) disc; it copies the
+   files it needs into the `data` folder, once. You can also drop the `.cue` / `.iso` on `Crash2.exe`, or run `Crash2.exe --import "path\to\disc.cue"`.
+   Compressed formats (`.chd`, `.pbp`, `.ecm`) are not supported. If you already have the files extracted, copy `SCUS_941.54`, `SYSTEM.CNF` and the
+   `S0` .. `S3` folders into `data` yourself.
+4. The lobby opens. Choose **Play Online**, or **Play Offline** to play alone.
+
+The folder holds your own game files, so keep it for yourself; the release zip itself never contains them.
+
+```
+Crash2.exe            the game
+data\                 your game files (SCUS_941.54, SYSTEM.CNF, S0..S3), found automatically
+states\               your save states
+cb2.cfg               settings (name, room, server, picture ...)
+memcard0.mcr          your game saves; records.txt: your level records
+Crash2-Server.exe     rendezvous server (no game inside), only needed to host one
+*.bat                 shortcuts: play, play offline (no lobby), start the server
+```
+
+## Playing online
+
+1. Start the game and pick **Play Online** in the lobby. Type nothing: you get into the public room.
+2. Everybody who chose the same room is in your game from then on. To play with specific friends, put the same room name in your `cb2.cfg`
+   (`room = MYFRIENDS`) or start with `Crash2.exe --room MYFRIENDS`.
+3. Walk into the same level. You see each other; the player list (`F3`) shows who is where.
+
+| Way of playing | When to use it |
+| --- | --- |
+| **Play Offline** | alone; nothing is sent anywhere |
+| **Play Local** | everybody is on the same PC or the same network: players find each other by themselves |
+| **Play Online** | over the internet: the lobby service lists open rooms and servers, and a rendezvous server introduces the players (it never carries the game) |
+
+Hosting your own rendezvous server, the lobby service and the network protocol are described in [docs/ONLINE.md](docs/ONLINE.md) and
+[docs/LOBBY_PROTOCOL.md](docs/LOBBY_PROTOCOL.md). Command line: `--online`, `--room NAME`, `--rendezvous host:port`, `--name NAME`, `--no-lobby`.
+
+<p align="center"><img src="docs/img/lobby.jpg" alt="The lobby" width="420"></p>
+
+## Controls
+
+| Key | Action | | Key | Action |
+| --- | --- | --- | --- | --- |
+| Arrows | D-pad | | `Esc` | in-game menu |
+| `Z` | Cross (jump) | | `F1` | cycle display filter |
+| `X` | Circle | | `F3` | show / hide the player list |
+| `A` | Square (spin) | | `F4` | show / hide the level timer |
+| `S` | Triangle | | `F5` / `F9` / `F6` | save state / load state / next slot |
+| `Q` `W` `E` `R` | L1 R1 L2 R2 | | `F11` | fullscreen |
+| `Enter` / Right Shift | Start / Select | | `F12` | screenshot |
+| Hold `Tab` | fast-forward | | `F2` | toggle the OpenGL renderer |
+
+A game pad works as well (left stick = D-pad). Everything is rebindable in the menu.
+
+## In-game menu
+
+`Esc` pauses the game and opens the menu. It works with keyboard, game pad and mouse: arrows / D-pad / hover to pick, `Enter` / A / click to choose,
+Left-Right or dragging to move a slider, `Esc` / B / right click to go back.
+
+| Page | What is on it |
+| --- | --- |
+| **Sound and picture** | volume, display filter, **textures** (sharp / smooth), fullscreen, **60 fps smoothing**, vsync, level timer |
+| **Online** | name tags, **opacity of the other players**, the player list |
+| **Records** | your best time and runs per level |
+| **Controls** | keyboard and game pad bindings side by side; `Enter` rebinds, `Del` clears, a key already in use swaps |
+| **Main menu** | leave the room and return to the lobby (progress not saved on the memory card is lost) |
+| **Quit** | close the game |
+
+<p align="center"><img src="docs/img/menu-sound.jpg" alt="Sound and picture" width="360"> <img src="docs/img/menu-controls.jpg" alt="Controls" width="360"></p>
+
+## Level times and records
+
+A timer at the top right times each level from the moment Crash can move until the game leaves the level. Finished runs become **personal records**
+(`records.txt`, listed on the menu's *Records* page); running out of lives is counted as an attempt, never as a record. Everybody in the room sees
+your best time for the level you are in and your latest finish. Details, the file format and the leaderboard plans: [docs/SPEEDRUN.md](docs/SPEEDRUN.md).
+
+## Graphics and speed
+
+- **Resolution:** `scale = 4` in `cb2.cfg` (1-8) is the multiple of the original resolution.
+- **60 fps smoothing:** draws a picture between each pair of the game's 30 fps frames by moving every polygon half way to where it was in the previous frame.
+  Adds one vblank (about 17 ms) of delay; the game's own timing is unchanged. Off by default.
+- **Textures: smooth:** bilinear texture filtering in the shader, without bleeding between neighbouring textures. Default is the original sharp look.
+- **Speed:** the emulator skips the engine's idle waiting, which halves its CPU use; frame pacing and vsync are tuned for an even rhythm.
+
+All of it, with the reasoning and how to measure it, is in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
+## Save states
+
+`F5` saves the whole game (all of the emulated console) into the current slot, `F9` loads it, `F6` switches between slots 1-4. Files: `states\slotN.cb2state`.
+Useful for practice and for reproducing bugs without replaying the cutscenes. They do not touch your memory card saves, they are not portable between versions that
+change the console emulation, and they only work with the normal (interpreter) engine.
+
+## Settings (`cb2.cfg`)
+
+Everything in the menu is remembered in `cb2.cfg` next to `Crash2.exe`; the file is plain text (`key = value`). The main keys:
+
+| Key | Meaning |
+| --- | --- |
+| `name`, `room` | your name above your Crash; the room you meet people in |
+| `scale` | internal resolution multiplier (1-8) |
+| `volume`, `filter`, `textures`, `smooth`, `vsync`, `timer` | the *Sound and picture* page |
+| `nametags`, `opacity`, `roster` | the *Online* page |
+| `key_<button>`, `pad_<button>` | bindings |
+| `rendezvous`, `directory` | rendezvous server and lobby service (built in; set only to override) |
+| `update = off`, `lobby = off` | no update check; no lobby |
+
+The full list is documented at the top of [src/config.hpp](src/config.hpp) and in `cb2.cfg.example`.
+
+## Updates
+
+When the lobby opens, the game checks this project's GitHub Releases for a newer version (one request, in the background). If there is one, the first row
+becomes *UPDATE TO Vx.y.z*; choosing it downloads the new `Crash2.exe`, verifies its SHA-256 and restarts. Your game files, settings and saves are not
+touched. `update = off` disables the check. How releases are made: [docs/RELEASING.md](docs/RELEASING.md).
+
+## How it works
+
+CB2-Online does not remake the game: it runs the **original game code and its scripts unmodified** on a PlayStation platform layer written in C++
+(R3000 CPU, exact GTE, GPU, SPU, CD-ROM, memory card, BIOS replacement), with an OpenGL window, audio and input. Online play hooks the game's own
+object routines: other players are created as extra Crash objects, fed with the positions and animations that arrive over UDP, and drawn by the
+game's own code. Details: [docs/ONLINE.md](docs/ONLINE.md), [docs/PLATFORM.md](docs/PLATFORM.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## For developers
+
+Building (Windows, Visual Studio 2022 + CMake), the command line, the test suite, the modding pipeline (NSF/NSD, GOOL, scenery), the research tools and the
+status of every part of the engine layer are in **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
 
 ```
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
 
-GLFW and GLM are fetched by CMake. glad, `stb_image_write.h` and `miniaudio.h` are in `third_party/`.
+## Known limits
 
-## The game folder (`dist\Crash2`)
+- Other players are shown, not solid: no collision and no shared crates or enemies.
+- The end of a level is detected through the game's own "go to the next level" request; it is verified for entering a level, and a real level end has not been
+  captured yet ([docs/SPEEDRUN.md](docs/SPEEDRUN.md)). Please report a finished level that is not counted.
+- Lag while an area loads is reduced (faster disc reads, no player objects created while the disc is busy) but the original freeze was never reproduced.
+- Not implemented yet in the console layer: SPU reverb, XA/CD audio.
+- Versions 0.3 and 0.4+ do not see each other online (the network format changed in 0.4).
 
-`powershell -File tools\make_folder.ps1` (after building the `cb2_game` target) makes a folder you can double-click:
+## Legal
 
-```
-Crash2.exe            the game: the original code on the emulated PlayStation layer, drawn by OpenGL (crate icon, no console)
-data\                 your own game files (SCUS_941.54, SYSTEM.CNF, S0..S3), found automatically; edit or swap them freely
-cb2.cfg               settings (name, server, scale ...)
-Crash2 Server.exe     rendezvous server (no game): introduces players to each other across the internet; also builds for Linux (`server/`)
-*.bat                 shortcuts: play, play offline (no lobby), start the rendezvous server
-```
-
-Saves (`memcard0.mcr`) are kept next to the exe. The folder holds your own game files, so keep it for yourself.
-**This repository contains no game data**; you need your own copy of the game (see `NOTICE.md`). Source code: MIT (`LICENSE`).
-`tools\make_exe.ps1` builds the alternative single-file `Crash2.exe` with the data embedded (`cb2_pack`).
-
-**Online play**: `Crash2.exe` starts with a lobby (play offline or online, room, name, server). There is no host and nobody types an
-address: players in the same room find each other on the same PC / network automatically, or through a rendezvous server on a cloud
-machine; they can leave and come back at any time. Other players appear inside the original game as extra Crashes with their name
-floating over the head. `--online --room NAME --rendezvous host` skip the lobby. An optional lobby service (not in this repo, protocol in
-`docs/LOBBY_PROTOCOL.md`) adds a public list of open servers and rooms. See `docs/ONLINE.md`.
-
-## Play
-
-```
-build\Release\cb2_play.exe <folder with SCUS_941.54 and S0-S3> [--mod <folder>]... [--card file.mcr]
-```
-
-The folder is your extracted disc: `SCUS_941.54`, `SYSTEM.CNF`, `S0`..`S3`. The game boots to the title screen on its own.
-Default keys (rebindable in the `Esc` menu): arrows = D-pad, `Z` Cross (jump), `X` Circle, `A` Square (spin), `S` Triangle,
-`Q`/`W` L1/R1, `E`/`R` L2/R2, `Enter` Start, Right Shift Select, `F12` screenshot. A gamepad (XInput/SDL mapping) works as well. Saves go to `memcard0.mcr`
-(standard 128 KiB PS1 card image).
-
-`--mod <folder>` overlays files onto the disc: any file in the mod folder (same relative path, e.g. `S1\S000001C.NSF`)
-replaces the original, and new files are added; several `--mod` options stack. `--ram-mb 8|16` gives the engine heap
-more memory than the 2 MiB of the retail console. See `docs/MODDING.md` and `docs/EDITING.md`.
-
-Player keys: `Esc` opens the in-game menu (see below), `F1` cycles the display filter (nearest / bilinear / sharp
-bilinear), `F11` fullscreen, hold `Tab` to fast-forward, `F2` toggles the OpenGL renderer.
-
-**Save states.** `F5` saves the whole game (all of the emulated console) into the current slot, `F9` loads it, `F6` switches
-between slots 1-4. Files: `states\slotN.cb2state` next to `Crash2.exe`. Useful for practice, for developing, and for reproducing
-bugs without replaying the cutscenes. For tests: `--load-state file` starts from a state, `--save-state-at FRAME:file` plays a
-scripted run and saves one. States are not portable between versions that change the console emulation, they do not touch your
-memory card saves, and they only work with the normal (interpreter) engine. `cb2_statetest` checks that a loaded state replays
-identically.
-
-**In-game menu (`Esc`).** Pauses the game. Pages: *Sound and picture* (volume slider, display filter, fullscreen, **60 fps smoothing**, vsync, level timer), *Online* (name tags,
-an **opacity slider** for the other players' Crashes, the player list), *Controls*, *Main menu* (starts a fresh copy at the lobby; unsaved
-progress is lost) and *Quit*. It works with keyboard, game pad and mouse: arrows / D-pad / hover to pick, Enter / A / click to choose,
-Left-Right or dragging to move a slider, Esc / B / right click to go back, mouse wheel to scroll. Online, the others see you stand still
-while the menu is open.
-*Controls* shows the **keyboard and game pad bindings side by side** for all 14 PS1 buttons: pick a row, press Enter (or click a cell),
-then press the new key or game pad button. A key or button already in use swaps with the one you pick; `Del` clears a binding; `Esc`,
-`Tab`, `F1`, `F2`, `F3`, `F5`, `F6`, `F9`, `F11` and `F12` are reserved. The left stick always works as the D-pad. Everything is remembered in
-`cb2.cfg` (`volume`, `filter`, `nametags`, `opacity`, `roster`, `key_<button>`, `pad_<button>`).
-
-**Online overlay.** In an online room, notices appear at the top left when somebody joins or leaves the room or enters or leaves a level
-(with the time they spent in it), and a **player list** at the right edge shows everybody's name, level and how long they have been in it
-(`F3` hides or shows the list; also in the menu).
-
-**Level times.** A timer at the top right (`F4`, or *Level timer* in the menu) times each level from the moment Crash can move until the
-game leaves it. Finished runs are saved as personal records in `records.txt` next to the exe and listed on the *Records* page of the menu;
-everybody in the room sees your best time and your latest finish in the player list. See [docs/SPEEDRUN.md](docs/SPEEDRUN.md).
-
-**Smoothness.** *Esc → Sound and picture → 60 fps smoothing* draws a picture between every two frames of the 30 fps game, *Textures → Smooth* filters
-the textures instead of showing blocky texels; the emulator also skips the engine's idle waiting, so it uses about half the CPU it did. See
-[docs/PERFORMANCE.md](docs/PERFORMANCE.md).
-
-The picture is drawn by an OpenGL renderer at `--scale N` (default 4) times the original resolution. Projected
-vertices keep their unrounded GTE positions, so geometry does not wobble at high resolution (`CB2_NOPRECISE=1`
-disables this). `--native` runs the statically translated engine code (identical output to the interpreter).
-
-Settings can live in `cb2.cfg` (see `cb2.cfg.example`): game folder, mods, memory card, scale and RAM size. With it,
-`cb2_play.exe` needs no arguments; the game data stays in its own folder, separate from the engine.
-
-**Updates.** When the lobby opens, the game checks the GitHub Releases of this project for a newer version (one request, in
-the background). If there is one, the first row of the lobby becomes *UPDATE TO Vx.y.z*; choosing it downloads the new
-`Crash2.exe`, verifies its SHA-256, and restarts the game. Your game files, settings and saves are not touched.
-`update = off` in `cb2.cfg` disables the check. How releases are made: `docs/RELEASING.md`.
-
-## Other tools
-
-```
-build\Release\cb2_viewer.exe <folder-with-S0-S3 | one .NSF> [--level N] [--screenshot out.png]   # scenery viewer
-build\Release\cb2_boot.exe   <folder> [instr] [--frames N] [--press 2310-2314:start] [--shot 2400:f.ppm] [--wav f.wav]
-build\Release\cb2_check.exe  <folder>      # parses every NSF, exits non-zero on any failure
-build\Release\cb2_roundtrip.exe <folder>   # NSF/NSD writer round trip, exits non-zero on any mismatch
-build\Release\cb2_gtetest.exe analysis\gte\tests.bin    # GTE vs real-hardware captures (tools\gte_tests_convert.py)
-build\Release\cb2_memtest.exe              # memory card filesystem self-test
-build\Release\cb2_vmdiff.exe <SCUS_941.54> [cases] [seed]   # GOOL VM vs the game's own interpreter
-build\Release\cb2_mod_demo.exe <level.NSF> <out folder>     # example mod (see docs/MODDING.md)
-build\Release\cb2_gool.exe  list|dump|patch|test ...        # GOOL assembler / script patcher (docs/EDITING.md)
-build\Release\cb2_scene.exe list|export|import|test ...     # scenery <-> OBJ editor pipeline (docs/EDITING.md)
-build\Release\cb2_models.exe <level.NSF>                 # models and animations in a level
-build\Release\cb2_entities.exe <level.NSF>               # zones, spawn points and entities of a level
-build\Release\cb2_crashtrace.exe <folder> --press ... --follow <object> --from F --to F   # records an object of the running game frame by frame
-build\Release\cb2_mpspike.exe <folder> --press ... --spawn F --type T --subtype S   # research tool: creates an object in the running game
-```
-
-`cb2_boot` is the headless harness: it runs the game for N instructions/frames, applies scripted pad input, saves
-frames and audio, and reports which BIOS calls and hardware registers the game used.
-
-Viewer controls: hold right mouse to look, `WASD` move, `Q`/`E` down/up, `Shift` fast,
-`Tab` / `Shift+Tab` next/previous level, `F` reframe, `Esc` quit.
-
-## Status
-
-| Milestone | State |
-| --- | --- |
-| Platform layer | Working: the game boots, plays the intro, and reaches gameplay with controls, audio and rendering. Details in `docs/PLATFORM.md` |
-| R3000 + GTE | R3000 verified against Unicorn; GTE passes all 1,150 captures taken from real hardware (22 commands) |
-| GPU | Software rasteriser into a 1024x512 VRAM (polygons, sprites, lines, blending, dithering, texture windows); not yet pixel-exact against hardware |
-| SPU | ADPCM voices, ADSR, loops, key on/off, ENDX, RAM transfers; no reverb, noise or pitch modulation yet |
-| CD-ROM | Controller registers, ReadN/Setloc/GetID etc. over an ISO9660 volume synthesised from the loose files (with mod overlay) |
-| Memory card | BIOS card API and file API on a native-layout card image; card detection and an empty-card Load Game screen verified in-game, save path covered by `cb2_memtest` only |
-| M1 NSF format + C++ parser | Done. 39 files, 2,762 chunks, 696 scenery worlds parse with no errors |
-| M2 OpenGL scenery viewer | Working: textured world geometry, 4/8/15-bit CLUT textures, flipbook animation, sky |
-| GOOL VM | Reference VM covering all 79 opcodes, including native blocks via the R3000 core, verified against the game's own interpreter on 38,000 random programs with 0 mismatches (`cb2_vmdiff`) |
-| Online play | Extra Crashes for the other players inside the original game, with name tags (`docs/ONLINE.md`). Tested with two instances on one PC and a test ghost; the others are shown only, no interaction |
-| M4 Modding pipeline | NSF/NSD writer verified byte-exact on all levels; modded NSFs load into the running game through `--mod`. GOOL assembler (all 453 scripts round-trip exactly) and scenery-to-OBJ editor (all 696 worlds round-trip exactly) are in; see `docs/EDITING.md`. Not written: new native code, textures/collision/entity/model authoring |
-
-Not done yet: SPU reverb, XA/CD audio, an OpenGL GPU backend with upscaling, a GOOL-to-C++ decompiler, a static
-recompiler, pixel-exact GPU comparison against hardware. The interpreter plus software GPU currently runs the game at
-roughly 1.5x real time on the development machine, so slower CPUs will need the recompiler or an optimised core.
-
-`tools/nsf_probe.py` is the Python prototype used to validate the format before the C++ port.
-See `docs/FORMAT.md` for the layout notes.
+Source code: MIT ([LICENSE](LICENSE)). **This repository contains no game data**: you need your own legally obtained copy of Crash Bandicoot 2. Crash Bandicoot
+is a trademark of its owners; this is a fan project with no connection to them. See [NOTICE.md](NOTICE.md).
