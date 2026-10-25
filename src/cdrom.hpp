@@ -21,6 +21,7 @@ public:
     uint64_t sectorsRead = 0;                      // sectors read so far (the online code waits for quiet before it touches the engine's heap)
     std::function<void(uint32_t)> onSectorRead;   // called with the LBA of every sector the controller reads (tools)
     uint64_t commandsSeen[0x20] = {};
+    uint32_t modesSet = 0;   // every bit ever written with Setmode (bit 5: whole sectors, 6: XA-ADPCM to the SPU, 7: double speed, 0: CD-DA)
 
     uint8_t read(uint32_t reg);
     void write(uint32_t reg, uint8_t v);

@@ -924,6 +924,13 @@ int main(int argc, char** argv) {
             glfwSetWindowTitle(win, t);
         }
     }
+    if (std::getenv("CB2_HWSUMMARY")) {   // which hardware features the game really used: decides what the console layer still needs
+        std::printf("[hw] frames %llu, CD sectors %llu, Setmode bits ever set %02x (bit6 = XA-ADPCM, bit0 = CD-DA), Setfilter x%llu, Pause x%llu, Play(CD-DA) x%llu\n", (unsigned long long)p.frames, (unsigned long long)p.cd.sectorsRead, p.cd.modesSet, (unsigned long long)p.cd.commandsSeen[0x0D], (unsigned long long)p.cd.commandsSeen[0x09], (unsigned long long)p.cd.commandsSeen[0x03]);
+        uint64_t reverbWrites = 0, reverbRegs = 0;
+        for (const auto& [a, n] : p.ioWrites) if (a >= 0x1F801DC0 && a < 0x1F801E00) { reverbWrites += n; ++reverbRegs; }
+        auto w = [&](uint32_t a) { const auto it = p.ioWrites.find(a); return it == p.ioWrites.end() ? 0ull : (unsigned long long)it->second; };
+        std::printf("[hw] SPU: reverb parameter registers written %llu times (%llu different), reverb work area (1DA2) x%llu, voice reverb-on (1D98/1D9A) x%llu/%llu, SPUCNT (1DAA) x%llu, CD volume (1DB0/1DB2) x%llu/%llu, noise-mode (1D94/1D96) x%llu/%llu, pitch-mod (1D90/1D92) x%llu/%llu\n", reverbWrites, reverbRegs, w(0x1F801DA2), w(0x1F801D98), w(0x1F801D9A), w(0x1F801DAA), w(0x1F801DB0), w(0x1F801DB2), w(0x1F801D94), w(0x1F801D96), w(0x1F801D90), w(0x1F801D92));
+    }
     if (relaunch) {
         mp.stop();   // frees the network port for the new copy
         glfwTerminate();

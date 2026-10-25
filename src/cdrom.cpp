@@ -67,7 +67,7 @@ void CdRom::command(uint8_t cmd) {
     case 0x0A: reading = false; status = 0x02; mode = 0; queue(kFast, 3, {status}); queue(kSlow, 2, {status}); break;  // Init
     case 0x0B: case 0x0C: queue(kFast, 3, {status}); break;            // Mute / Demute
     case 0x0D: if (p.size() >= 2) { filterFile = p[0]; filterChannel = p[1]; } queue(kFast, 3, {status}); break;
-    case 0x0E: if (!p.empty()) mode = p[0]; queue(kFast, 3, {status}); break;  // Setmode
+    case 0x0E: if (!p.empty()) { mode = p[0]; modesSet |= mode; } queue(kFast, 3, {status}); break;  // Setmode
     case 0x13: queue(kFast, 3, {status, 0x01, 0x01}); break;           // GetTN
     case 0x14: queue(kFast, 3, {status, 0x00, 0x02}); break;           // GetTD
     case 0x15: case 0x16: lba = seekLba; reading = false; queue(kFast, 3, {status}); queue(kSlow, 2, {status}); break;  // SeekL / SeekP
