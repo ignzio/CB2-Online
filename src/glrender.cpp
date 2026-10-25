@@ -201,8 +201,9 @@ bool HiResRenderer::init(int scale) {
 }
 
 void HiResRenderer::apply(const State& s) {
+    if (markCovered) glStencilOp(GL_KEEP, GL_KEEP, s.blend == -1 ? GL_REPLACE : GL_KEEP);   // opaque (-1) drawing marks the pixel; blended drawing and black backdrops (-4) do not
     glScissor(s.area[0] * scaleFactor, s.area[1] * scaleFactor, (s.area[2] - s.area[0] + 1) * scaleFactor, (s.area[3] - s.area[1] + 1) * scaleFactor);
-    if (s.blend < 0) { glDisable(GL_BLEND); return; }
+    if (s.blend < 0) { glDisable(GL_BLEND); return; }   // -1 opaque, -4 opaque but not marking
     glEnable(GL_BLEND);
     glBlendEquation(s.blend == 2 ? GL_FUNC_REVERSE_SUBTRACT : GL_FUNC_ADD);
     switch (s.blend) {
@@ -345,6 +346,10 @@ void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector
         glGenFramebuffers(1, &midFbo);
         glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, midTex, 0);
+        glGenRenderbuffers(1, &midStencil);
+        glBindRenderbuffer(GL_RENDERBUFFER, midStencil);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, textureWidth(), textureHeight());
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, midStencil);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
     glViewport(0, 0, textureWidth(), textureHeight());
@@ -352,12 +357,30 @@ void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_SCISSOR_TEST);
     glScissor(rx, ry, rw, rh);
+    glStencilMask(0xFF);
     glClearColor(0, 0, 0, 1);
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClearStencil(0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, vramTex);
+    glEnable(GL_STENCIL_TEST);
+    glStencilFunc(GL_ALWAYS, 1, 0xFF);
+    markCovered = true;
     replay(cmds, texts, nullptr);
+    markCovered = false;
     glDisable(GL_BLEND);
+    // Pixels no opaque triangle drew (a gap between moved triangles; or only a black backdrop or blending was there) take the real picture.
+    glStencilFunc(GL_EQUAL, 0, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    glUseProgram(blitProg);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, colorTex);
+    glUniform1i(blitTex, 0);
+    glUniform4f(blitRect, 0.0f, 0.0f, 1024.0f, 512.0f);
+    glUniform4f(glGetUniformLocation(blitProg, "region"), 0.0f, 0.0f, 1.0f, 1.0f);
+    glBindVertexArray(blitVao);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisable(GL_STENCIL_TEST);
     glDisable(GL_SCISSOR_TEST);
     // Where the moved triangles left a gap, the picture is black (a pixel nothing drew, or a black backdrop polygon the scenery above it no longer covers): take the real
     // picture there. Copy the result aside first, then compose the two into the target.
@@ -391,6 +414,7 @@ void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector
 }
 void HiResRenderer::replay(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& texts, const std::vector<uint16_t>* pool) {
     cur = State{};
+    cur.blend = -2;   // the GL scissor and blend state left by whatever drew before are unknown: the first command must set them
     batch.clear();
     auto want = [&](int blend, const int16_t* area) {
         State s;
@@ -438,6 +462,8 @@ void HiResRenderer::replay(const std::vector<GpuCmd>& cmds, const std::vector<st
             break;
         }
         case GpuCmd::Kind::Tri:
+            // a flat black opaque triangle is a backdrop the game draws under the scenery: where the scenery has moved away it must not count as covering the pixel
+            if (markCovered && !c.textured && !c.semi && c.col[0][0] < 6 && c.col[0][1] < 6 && c.col[0][2] < 6 && c.col[1][0] < 6 && c.col[2][0] < 6) { want(-4, c.area); pushTri(c, 0); break; }
             if (c.semi && c.textured) {
                 want(-1, c.area); pushTri(c, 4);
                 want(c.semiMode, c.area); pushTri(c, 8);

@@ -28,8 +28,9 @@ bool similarShape(const GpuCmd& a, const GpuCmd& b) {
 }
 
 // A screen position (relative to the display area) as a map key, to 1/16 pixel.
-uint64_t vertexKey(float x, float y) {
-    return uint64_t(uint32_t(int32_t(std::lround(x * 16.0f)))) << 32 | uint32_t(int32_t(std::lround(y * 16.0f)));
+uint64_t vertexKey(float x, float y, bool semi = false) {
+    // The see-through layer (reflections, water, glass) and the opaque geometry can share corner positions and still move differently: they keep separate tables.
+    return uint64_t(uint32_t(int32_t(std::lround(x * 16.0f)))) << 32 | (uint32_t(int32_t(std::lround(y * 16.0f))) & 0x7FFFFFFFu) | (semi ? 0x80000000u : 0u);
 }
 
 uint64_t keyOf(const GpuCmd& c) {
@@ -201,10 +202,11 @@ void FrameInterpolator::prepare() const {
         ++local.matched;
         const GpuCmd& c = cur.cmds[m.curIdx];
         if (c.semi) ++local.semiMatched;
-        for (int v = 0; v < 3; ++v) field[vertexKey(c.x[v] - float(cur.ox), c.y[v] - float(cur.oy))] = {m.d[v][0], m.d[v][1]};
+        for (int v = 0; v < 3; ++v) field[vertexKey(c.x[v] - float(cur.ox), c.y[v] - float(cur.oy), c.semi)] = {m.d[v][0], m.d[v][1]};
     }
     std::vector<uint8_t> isMatched(cur.cmds.size(), 0);
-    for (const Match& m : matches) if (m.alive) isMatched[m.curIdx] = 1;
+    std::vector<const Match*> ownMatch(cur.cmds.size(), nullptr);
+    for (const Match& m : matches) if (m.alive) { isMatched[m.curIdx] = 1; ownMatch[m.curIdx] = &m; }
     // the matched triangles by place (centroid and mean movement), for the ones that found no partner and share no corner with a matched one
     constexpr float kCell = 32.0f;
     struct Near { float x, y, dx, dy; };
@@ -227,7 +229,8 @@ void FrameInterpolator::prepare() const {
         float dv[3][2] = {};
         bool has[3] = {};
         for (int v = 0; v < 3; ++v) {
-            const auto it = field.find(vertexKey(c.x[v] - float(cur.ox), c.y[v] - float(cur.oy)));
+            auto it = field.find(vertexKey(c.x[v] - float(cur.ox), c.y[v] - float(cur.oy), c.semi));
+            if (it == field.end() && c.semi) it = field.find(vertexKey(c.x[v] - float(cur.ox), c.y[v] - float(cur.oy), false));   // a see-through layer over a floor follows the floor
             if (it == field.end()) continue;
             dv[v][0] = it->second[0]; dv[v][1] = it->second[1]; has[v] = true;
             mx += dv[v][0]; my += dv[v][1]; ++n;
@@ -254,7 +257,9 @@ void FrameInterpolator::prepare() const {
             if (sw > 0) for (int v = 0; v < 3; ++v) { vdisp[i][size_t(2 * v)] = sx / sw; vdisp[i][size_t(2 * v + 1)] = sy / sw; }
             continue;
         }
-        if (isMatched[i] || followsGeometry) {   // all three corners move on their own, the way the partner shows
+        if (isMatched[i] && ownMatch[i]) {   // a matched triangle moves exactly the way its partner shows (the neighbours agreed with it to within a few pixels already)
+            for (int v = 0; v < 3; ++v) { vdisp[i][size_t(2 * v)] = ownMatch[i]->d[v][0]; vdisp[i][size_t(2 * v + 1)] = ownMatch[i]->d[v][1]; }
+        } else if (followsGeometry) {   // all three corners are corners of geometry that moved
             for (int v = 0; v < 3; ++v) { vdisp[i][size_t(2 * v)] = dv[v][0]; vdisp[i][size_t(2 * v + 1)] = dv[v][1]; }
         } else {              // no partner: move as a whole, with the average of the corners it shares with others, so its shape is kept
             for (int v = 0; v < 3; ++v) { vdisp[i][size_t(2 * v)] = mx / float(n); vdisp[i][size_t(2 * v + 1)] = my / float(n); }

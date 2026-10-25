@@ -46,6 +46,8 @@ private:
     State cur;
     GLint blitRect = -1, blitTex = -1, mainVram = -1, mainFilter = -1;
     int textureFilter = 0;
+    bool markCovered = false;   // drawing an in-between picture: opaque triangles mark their pixels in the stencil buffer
+    GLuint midStencil = 0;
     bool perspective = false;
     float wide = 1.0f;
     float gpuAreaLeft = 0, gpuAreaWidth = 320;   // the screen's area while its commands are replayed (for name tags)

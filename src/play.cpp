@@ -450,6 +450,7 @@ int main(int argc, char** argv) {
     settings.perspective = cfg.perspective || std::getenv("CB2_PERSPECTIVE") != nullptr;
     settings.vsync = cfg.vsync;
     psx::FrameInterpolator interp;
+    if (const char* g = std::getenv("CB2_GROW")) interp.grow = float(std::atof(g));   // tests
     std::vector<psx::GpuCmd> midCmds;
     std::vector<std::string> midTexts;
     int appliedVsync = -1;
@@ -703,7 +704,7 @@ int main(int argc, char** argv) {
         // Holding Tab runs unthrottled (fast-forward).
         fast = glfwGetKey(win, GLFW_KEY_TAB) == GLFW_PRESS || (captureFrame != 0 && (!paceFrom || p.frames < paceFrom));
         const double due = fast ? 4.0 : (glfwGetTime() - t0) * 59.94 - double(p.frames - base);
-        continuous = settings.smooth && useHires && showHires && pairValid && !fast && (hz >= 90.0 || forceContinuous);
+        continuous = settings.smooth && useHires && showHires && pairValid && !fast && !captureMid && (hz >= 90.0 || forceContinuous);
         if (due < 1.0 && !continuous) {
             glfwPollEvents();
             p.padButtons = padNow();
@@ -785,7 +786,7 @@ int main(int argc, char** argv) {
                 static const bool smoothLog2 = std::getenv("CB2_SMOOTHLOG") != nullptr;
                 if (smoothLog2) std::printf("[smooth] frame %llu: no in-between picture (%s)\n", (unsigned long long)p.frames, interp.whyNot());
             }
-            const bool contMode = settings.smooth && useHires && showHires && (hz >= 90.0 || forceContinuous);
+            const bool contMode = settings.smooth && useHires && showHires && !captureMid && (hz >= 90.0 || forceContinuous);
             if (flipped && contMode && interp.canInterpolate() && interp.flipStamp() == uint32_t(p.gpu.vblankCount)) { pairValid = true; pairFrames = p.frames; }
             if (contMode && pairValid && !fast) {
                 const double e = (glfwGetTime() - t0) * 59.94 + double(base);
