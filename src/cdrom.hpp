@@ -28,6 +28,13 @@ public:
     uint32_t readDataWord();       // for DMA 3
     bool dataAvailable() const { return dataPos < data.size(); }
     size_t dataLeft() const { return data.size() - std::min(dataPos, data.size()); }
+    // Cycles until the controller next does something on its own (a queued response comes due or the next sector is read); UINT64_MAX when idle.
+    uint64_t cyclesToEvent() const {
+        uint64_t n = UINT64_MAX;
+        if (!pending.empty()) n = pending.front().due > now ? pending.front().due - now : 0;
+        if (reading) n = std::min(n, nextSector > now ? nextSector - now : 0);
+        return n;
+    }
 
 private:
     int index = 0;

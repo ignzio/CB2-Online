@@ -96,6 +96,11 @@ public:
     void configureShadow(std::vector<uint64_t>* ioLog);
     bool nativeEnabled() const { return useNative; }
     bool yieldOnVblank = false;              // native mode: run() returns at every vertical blank
+    std::map<uint32_t, uint64_t>* pcHist = nullptr;   // profiling (CB2_PCHIST): every 256th interpreted instruction, by pc
+    // The engine's VSync() waits for the next vertical blank in a polling loop that is most of what the interpreter executes. With idleSkip the loop is not run
+    // instruction by instruction: its iterations up to the next device event are accounted for in one step (same machine state, same guest time).
+    bool idleSkip = true;
+    uint64_t idleSkippedInstructions = 0;
     uint64_t pollAt = 0;                     // instruction count at which generated code calls pollNative()
     uint64_t nativeCalls = 0, interpCalls = 0, interpSteps = 0;
     std::map<uint32_t, uint64_t> interpHist;   // every 1024th interpreted instruction, by pc
@@ -145,6 +150,8 @@ private:
         return (addr & 3) == 0 && addr >= 0x80010000u && i < nativeFns.size() ? nativeFns[i] : nullptr;
     }
     void stepHybrid();
+    uint64_t skipVsyncSpin(uint64_t room);   // returns the instructions skipped (at most oom)
+    uint64_t cyclesToNextEvent() const;
     void interpUntil(uint32_t addr, uint32_t ret);
     void nativeInterrupt();
     void syncTime() { cycles = cpu.instructions * 2; }
@@ -177,7 +184,7 @@ private:
 
     // GPU read latch for GP0 transfer
     uint32_t cdPrevIrq = 0;
-    uint64_t lastService = 0, nextVblank = 0;
+    uint64_t lastService = 0, nextVblank = 0, serviceAt = 0;   // serviceAt: devices are brought up to date every 64 cycles, on a grid that does not depend on how the run was split into calls
     static constexpr uint64_t kFrameCycles = 564480;
 
     // BIOS state

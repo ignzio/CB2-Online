@@ -11,6 +11,8 @@
 //   pad_cross = A                      game pad bindings, same ids; buttons A B X Y LB RB BACK START GUIDE LEFT STICK RIGHT STICK DPAD UP/RIGHT/DOWN/LEFT, triggers LT RT, NONE
 //   opacity = 100                      how solid the other players' Crashes are (10..100)
 //   timer   = on                       the level timer in the corner (F4 toggles it)
+//   smooth  = off                      60 fps: draw the picture between two frames of the 30 fps game (Esc menu: Sound and picture)
+//   vsync   = on                       wait for the monitor's refresh when showing a picture (no tearing)
 //   roster  = on                       the list of players at the right edge (F3 toggles it in game)
 //   key_cross = Z                      keyboard bindings: key_up/down/left/right/cross/square/circle/triangle/l1/r1/l2/r2/start/select
 //   name    = Player                   name shown above your Crash in online play (cb2_play / Crash2.exe)
@@ -41,6 +43,8 @@ struct Config {
     int opacity = 100;         // how solid the other players' Crashes are drawn, 10..100 percent
     bool roster = true;        // the player list at the right edge (online)
     bool timer = true;         // the level timer in the corner
+    bool smooth = false;       // draw an in-between picture every other vertical blank (60 fps from the 30 fps game), see interp.hpp
+    bool vsync = true;         // swap with the monitor's refresh
     bool update = true;        // look for a newer release (see updater.hpp); update = off disables it
     bool lobby = true;         // show the online lobby before the game starts (lobby = off disables it)
 #ifndef CB2_DEFAULT_DIRECTORY

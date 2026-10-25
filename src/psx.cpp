@@ -256,6 +256,61 @@ void Platform::returnFromException() {
     saved.valid = false;
 }
 
+namespace {
+// PsyQ VSync(): the loop that waits for the vertical-blank counter (0x8005DC98) to reach the target in $a0, with its time-out counter at 0x10($sp).
+constexpr uint32_t kVsyncSpin = 0x8004A5F4, kVsyncCounter = 0x8005DC98;
+constexpr uint32_t kVsyncCode[][2] = {{0x8004A5F4, 0x8FA20010}, {0x8004A5F8, 0}, {0x8004A5FC, 0x2442FFFF}, {0x8004A600, 0xAFA20010}, {0x8004A604, 0x8FA20010}, {0x8004A608, 0},
+                                       {0x8004A60C, 0x1443000C}, {0x8004A610, 0}, {0x8004A640, 0x3C028006}, {0x8004A644, 0x8C42DC98}, {0x8004A648, 0}, {0x8004A64C, 0x0044102A},
+                                       {0x8004A650, 0x1440FFE8}, {0x8004A654, 0}};
+constexpr uint64_t kVsyncLoopInstructions = 14;   // one pass: 8 instructions up to the branch and its delay slot, 6 more to the loop-back branch and its delay slot
+}  // namespace
+
+// Cycles from now until something other than the CPU can change the machine: the vertical blank, the CD controller, a timer interrupt, the SPU interrupt.
+uint64_t Platform::cyclesToNextEvent() const {
+    if (spu.irqEnabled()) return 0;
+    const uint64_t behind = cycles - lastService;   // the devices have been told the time as of the last service()
+    uint64_t horizon = nextVblank > cycles ? nextVblank - cycles : 0;
+    auto soonest = [&](uint64_t in) { if (in != UINT64_MAX) horizon = std::min(horizon, in > behind ? in - behind : 0); };
+    soonest(cd.cyclesToEvent());
+    for (int i = 0; i < 3; ++i) {
+        const Timer& t = timers[i];
+        if (!(t.mode & 0x30) || (t.irqFired && !(t.mode & 0x40))) continue;
+        uint64_t div = 1;
+        if (i == 0 && (t.mode & 0x100)) div = 6;
+        if (i == 1 && (t.mode & 0x100)) div = 2146;
+        if (i == 2 && (t.mode & 0x200)) div = 8;
+        const uint32_t limit = (t.mode & 8) ? t.target : 0xFFFF;
+        uint64_t units = UINT64_MAX;
+        if ((t.mode & 0x10) && t.target && t.value < t.target) units = t.target - t.value;
+        if (t.mode & 0x20) units = std::min<uint64_t>(units, t.value <= limit ? uint64_t(limit) + 1 - t.value : 0);
+        if (units == UINT64_MAX) continue;
+        const uint64_t need = units * div;
+        soonest(need > t.rem ? need - t.rem : 0);
+    }
+    return horizon;
+}
+
+uint64_t Platform::skipVsyncSpin(uint64_t room) {
+    constexpr uint64_t kMargin = 256;   // stay this far from the next event: it is then reached by running the loop normally
+    if (cpu.pendReg != 0 || cpu.r[3] != 0xFFFFFFFFu) return 0;
+    const uint64_t horizon = cyclesToNextEvent();
+    if (horizon <= kMargin + 2 * kVsyncLoopInstructions * 2) return 0;
+    uint64_t passes = (horizon - kMargin) / (kVsyncLoopInstructions * 2);
+    const uint32_t timeoutAt = cpu.r[29] + 0x10;
+    const int32_t timeout = int32_t(cpu.rd32(timeoutAt));
+    if (timeout <= 2 || int32_t(cpu.rd32(kVsyncCounter)) >= int32_t(cpu.r[4])) return 0;
+    passes = std::min<uint64_t>(passes, uint64_t(timeout - 2));   // never skip the time-out itself
+    passes = std::min(passes, room / kVsyncLoopInstructions);   // run() hands control back after a fixed number of instructions: skipped ones count, so it stays where it always did
+    if (passes == 0) return 0;
+    for (const auto& w : kVsyncCode) if (cpu.rd32(w[0]) != w[1]) return 0;
+    cpu.wr32(timeoutAt, uint32_t(timeout - int32_t(passes)));
+    cpu.r[2] = 1;   // the result of the loop's last comparison
+    cpu.instructions += passes * kVsyncLoopInstructions;
+    idleSkippedInstructions += passes * kVsyncLoopInstructions;
+    syncTime();
+    return passes * kVsyncLoopInstructions;
+}
+
 std::string Platform::run(uint64_t count) {
     if (useNative) {
         std::unique_lock<std::mutex> lk(gameMutex);
@@ -272,9 +327,9 @@ std::string Platform::run(uint64_t count) {
         return gameState == GameState::Finished ? lastError : std::string();
     }
     try {
-        uint64_t nextService = cycles;
+        if (serviceAt > cycles + 64) serviceAt = cycles;   // stale: a saved state was loaded
         for (uint64_t i = 0; i < count; ++i) {
-            if (cycles >= nextService) { service(); nextService = cycles + 64; }
+            if (cycles >= serviceAt) { service(); serviceAt += 64 * ((cycles - serviceAt) / 64 + 1); }
             if ((istat & imask) && hookBuf && !saved.valid && (cpu.cop0[12] & 1) && cpu.nextPc == cpu.pc + 4) enterInterrupt();
             if (entryHook && cpu.nextPc == cpu.pc + 4 && lookupNative(cpu.pc)) entryHook(cpu.pc);
             if (!hookMark.empty() && cpu.nextPc == cpu.pc + 4 && !inHook) {
@@ -288,8 +343,10 @@ std::string Platform::run(uint64_t count) {
                     }
                 }
             }
+            if (idleSkip && cpu.pc == kVsyncSpin && cpu.nextPc == kVsyncSpin + 4 && !(istat & imask) && !inHook) i += skipVsyncSpin(count - i - 1);
             cpu.step();
             syncTime();
+            if (pcHist && (cpu.instructions & 255) == 0) ++(*pcHist)[cpu.pc];
         }
     } catch (const std::exception& e) {
         char b[160];

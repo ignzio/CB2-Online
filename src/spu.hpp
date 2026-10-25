@@ -23,6 +23,7 @@ public:
     void dmaRead(uint8_t* data, uint32_t bytes);
     void tick(uint32_t frames);
 
+    bool irqEnabled() const { return (regs[0xD5] & 0x40) != 0; }
 private:
     enum class Phase { Off, Attack, Decay, Sustain, Release };
     struct Voice {

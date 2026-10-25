@@ -13,7 +13,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
@@ -29,9 +28,16 @@
 #include "discimport.hpp"
 #include "savestate.hpp"
 #include "hud.hpp"
+#include "interp.hpp"
 #include "roster.hpp"
 #include "runtracker.hpp"
 #include "psx.hpp"
+
+#ifdef _WIN32
+// Windows sleeps in steps of about 15 ms unless asked for finer ones; the frame pacing below needs 1 ms.
+extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned int);
+#pragma comment(lib, "winmm.lib")
+#endif
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
@@ -150,6 +156,8 @@ int main(int argc, char** argv) {
     std::string capturePath;
     bool autoStart = false, hidden = false, interpOnly = false;   // --autostart presses Start at the title screen; --hidden hides the window
     bool windowCapture = false;
+    bool forceSmooth = false, captureMid = false;   // tests: 60 fps smoothing on from the start, and --capture saves an in-between picture
+    float smoothT = 0.5f;                          // how far back towards the previous frame the in-between picture is (0 = the newest frame)
     cb2mp::Options online;                    // --online / --room / --rendezvous / --name: other players inside the game (docs/ONLINE.md)
     online.name = cfg.name;
     online.room = cfg.room;
@@ -196,6 +204,9 @@ int main(int argc, char** argv) {
             capturePath = s.substr(s.find(char(58)) + 1);
         }
         else if (!std::strcmp(argv[i], "--autostart")) autoStart = true;
+        else if (!std::strcmp(argv[i], "--smooth")) forceSmooth = true;
+        else if (!std::strcmp(argv[i], "--smooth-t") && more) smoothT = float(std::atof(argv[++i]));
+        else if (!std::strcmp(argv[i], "--capture-mid")) { captureMid = true; forceSmooth = true; }
         else if (!std::strcmp(argv[i], "--window-capture")) windowCapture = true;   // with --capture: save the window's own picture
         else if (!std::strcmp(argv[i], "--hidden")) hidden = true;
         else if (!std::strcmp(argv[i], "--online")) online.online = true;   // straight into the room, without the lobby
@@ -306,6 +317,9 @@ int main(int argc, char** argv) {
     }
 
     if (!glfwInit()) { psx::showError("cannot initialise the window system"); return 1; }
+#ifdef _WIN32
+    timeBeginPeriod(1);
+#endif
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -415,6 +429,12 @@ int main(int argc, char** argv) {
     settings.opacity = cfg.opacity;
     settings.roster = cfg.roster;
     settings.timer = cfg.timer;
+    settings.smooth = cfg.smooth || forceSmooth;
+    settings.vsync = cfg.vsync;
+    psx::FrameInterpolator interp;
+    std::vector<psx::GpuCmd> midCmds;
+    std::vector<std::string> midTexts;
+    int appliedVsync = -1;
     settings.keys.load(cfg.keyNames, cfg.padNames);
     psx::AudioOut audio;
     if (audio.start(44100)) p.spu.sink = [&](int16_t l, int16_t r) {
@@ -467,6 +487,8 @@ int main(int argc, char** argv) {
         cfg.remember(exeDir, "opacity", std::to_string(settings.opacity));
         cfg.remember(exeDir, "roster", settings.roster ? "on" : "off");
         cfg.remember(exeDir, "timer", settings.timer ? "on" : "off");
+        cfg.remember(exeDir, "smooth", settings.smooth ? "on" : "off");
+        cfg.remember(exeDir, "vsync", settings.vsync ? "on" : "off");
         for (int i = 0; i < cb2input::kBindingCount; ++i) {
             cfg.remember(exeDir, std::string("key_") + cb2input::kBindings[i].id, cb2input::keyName(settings.keys.key[i]));
             cfg.remember(exeDir, std::string("pad_") + cb2input::kBindings[i].id, cb2input::padName(settings.keys.pad[i]));
@@ -493,6 +515,9 @@ int main(int argc, char** argv) {
     std::string lastDiscFile;
     double msRun = 0, msRender = 0, msSwap = 0, lastRun = 0, lastRender = 0, lastSwap = 0;
     auto since = [](std::chrono::steady_clock::time_point a) { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count(); };
+    std::map<uint32_t, uint64_t> pcHistStore, *pcHistMap = nullptr;
+    if (std::getenv("CB2_PCHIST")) { pcHistMap = &pcHistStore; p.pcHist = pcHistMap; }
+    if (std::getenv("CB2_NOIDLESKIP")) p.idleSkip = false;
     if (frameLog) p.cd.onSectorRead = [&](uint32_t lba) {
         ++sectorsRead;
         const std::string f = p.disc.fileAt(lba);
@@ -528,6 +553,7 @@ int main(int argc, char** argv) {
             if (extra.size() >= 4) std::memcpy(&lvl, extra.data(), 4);
             mp.stateLoaded(lvl);
             tracker.stateLoaded(extra);
+            interp.reset();
             t0 = glfwGetTime();
             base = p.frames;
             suppressPad = true;
@@ -633,7 +659,8 @@ int main(int argc, char** argv) {
         if (due < 1.0) {
             glfwPollEvents();
             p.padButtons = padNow();
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            // sleep while the next frame is still a few milliseconds away, then spin for the rest: the sleep alone is too coarse to keep an even rhythm
+            if ((1.0 - due) / 59.94 > 0.0025) std::this_thread::sleep_for(std::chrono::milliseconds(1)); else std::this_thread::yield();
             continue;
         }
         if (due > 8.0 || fast) { t0 = glfwGetTime(); base = p.frames; }
@@ -677,20 +704,44 @@ int main(int argc, char** argv) {
             rosterEvents.clear();
         }
         if (captureAfterPuppet && mp.puppetCount() > 0 && !puppetSince) puppetSince = p.frames;
-        const bool captureNow = captureFrame && p.frames >= captureFrame && (!captureAfterPuppet || (puppetSince && p.frames >= puppetSince + captureAfterPuppet));
+        bool captureNow = captureFrame && p.frames >= captureFrame && (!captureAfterPuppet || (puppetSince && p.frames >= puppetSince + captureAfterPuppet));
+        bool showMid = false;
         if (!paused) {
             p.gpu.flushTags();
+            static const bool cmdLog = std::getenv("CB2_CMDLOG") != nullptr;
+            if (cmdLog) std::printf("[cmd] frame %llu cmds %zu display %d,%d\n", (unsigned long long)p.frames, p.gpu.cmds.size(), p.gpu.displayX, p.gpu.displayY);
             const auto renderBegan = std::chrono::steady_clock::now();
+            // 60 fps smoothing: the commands of this pass are kept for the interpolator before the renderer consumes them
+            bool flipped = false;
+            if (useHires && settings.smooth && showHires) flipped = interp.feed(p.gpu.cmds, p.gpu.textPool, p.frames);
+            else interp.reset();
             if (useHires) hires.render(p.gpu);
+            if (flipped && interp.canInterpolate()) {
+                psx::FrameInterpolator::Stats st;
+                interp.build(smoothT, midCmds, midTexts, &st);
+                hires.renderMid(midCmds, midTexts, p.gpu.hres);
+                showMid = true;
+                static const bool smoothLog = std::getenv("CB2_SMOOTHLOG") != nullptr;
+                if (smoothLog) std::printf("[smooth] frame %llu: %zu triangles, %zu matched\n", (unsigned long long)p.frames, st.triangles, st.matched);
+            }
             msRender += since(renderBegan);
         }
+        if (captureMid && !showMid) captureNow = false;
         const auto& g = p.gpu;
         const bool hiPath = showHires && g.displayEnabled && !g.color24;
         if (captureNow && !windowCapture) {
             std::vector<uint32_t> img;
             int iw = 0, ih = 0;
             if (useHires) {
-                hires.readDisplay(g, img, iw, ih);
+                hires.readDisplay(g, img, iw, ih, captureMid);
+                if (captureMid) {   // with --smooth-t 0 the in-between picture must be the real one: how far off is the replay?
+                    std::vector<uint32_t> real;
+                    int rw = 0, rh = 0;
+                    hires.readDisplay(g, real, rw, rh, false);
+                    size_t diff = 0;
+                    for (size_t i = 0; i < real.size() && i < img.size(); ++i) if ((real[i] ^ img[i]) & 0xFFFFFFu) ++diff;
+                    std::printf("[smooth] in-between picture differs from the real one in %zu of %zu pixels\n", diff, real.size());
+                }
             }
             if (useHires) stbi_write_png(capturePath.c_str(), iw, ih, 4, img.data(), iw * 4);
             std::printf("captured frame %llu to %s (%dx%d)\n", (unsigned long long)p.frames, capturePath.c_str(), iw, ih);
@@ -714,7 +765,7 @@ int main(int argc, char** argv) {
                 rgba[size_t(y) * 1024 + size_t(x)] = c;
             }
         }
-        glBindTexture(GL_TEXTURE_2D, hiPath ? hires.colorTexture() : tex);
+        glBindTexture(GL_TEXTURE_2D, hiPath ? (showMid ? hires.midTexture() : hires.colorTexture()) : tex);
         if (!hiPath) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
         int fw, fh;
         glfwGetFramebufferSize(win, &fw, &fh);
@@ -782,6 +833,8 @@ int main(int argc, char** argv) {
             std::printf("window captured at frame %llu to %s (%dx%d), path %s\n", (unsigned long long)p.frames, capturePath.c_str(), fw, fh, hiPath ? "opengl" : "software");
             break;
         }
+        const int wantVsync = settings.vsync && !captureFrame && !hidden ? 1 : 0;
+        if (wantVsync != appliedVsync) { glfwSwapInterval(wantVsync); appliedVsync = wantVsync; }
         const auto swapBegan = std::chrono::steady_clock::now();
         glfwSwapBuffers(win);
         glfwPollEvents();
@@ -812,6 +865,23 @@ int main(int argc, char** argv) {
         }
         if (p.frames - lastTitle >= 60) {
             lastTitle = p.frames;
+            static const bool perf = std::getenv("CB2_PERF") != nullptr;
+            static uint64_t perfFrames = p.frames;
+            static double perfRun = 0, perfRender = 0, perfSwap = 0, perfWall = glfwGetTime();
+            if (perf && p.frames - perfFrames >= 600) {
+                const double n = double(p.frames - perfFrames), wall = glfwGetTime() - perfWall;
+                std::printf("[perf] per frame: emulate %.2f ms, render %.2f ms, swap %.2f ms; wall %.2f ms (%.0f frames/s)\n", (msRun - perfRun) / n, (msRender - perfRender) / n, (msSwap - perfSwap) / n, wall * 1000.0 / n, n / wall);
+                if (pcHistMap) {
+                    std::vector<std::pair<uint64_t, uint32_t>> top;
+                    uint64_t all = 0;
+                    for (auto& [pc, n] : *pcHistMap) { top.push_back({n, pc}); all += n; }
+                    std::sort(top.rbegin(), top.rend());
+                    for (size_t i = 0; i < top.size() && i < 24; ++i) std::printf("[pc] %08x %5.1f%%\n", top[i].second, 100.0 * double(top[i].first) / double(all));
+                    pcHistMap->clear();
+                }
+                std::fflush(stdout);
+                perfFrames = p.frames; perfRun = msRun; perfRender = msRender; perfSwap = msSwap; perfWall = glfwGetTime();
+            }
             char t[128];
             if (mp.active()) std::snprintf(t, sizeof t, "Crash Bandicoot 2 - online: %s", mp.status().c_str());
             else std::snprintf(t, sizeof t, "Crash Bandicoot 2 (native port) - frame %llu", (unsigned long long)p.frames);

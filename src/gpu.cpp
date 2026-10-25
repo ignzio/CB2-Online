@@ -128,7 +128,19 @@ void Gpu::gp1(uint32_t w) {
     case 0x01: fifo.clear(); need = 0; xfer = Xfer::None; break;
     case 0x03: displayEnabled = (w & 1) == 0; break;
     case 0x04: dir = int(w & 3); break;
-    case 0x05: displayX = int(w & 0x3FF); displayY = int((w >> 10) & 0x1FF); noteFramebuffer(displayX, displayY, hres, vres); break;
+    case 0x05: {
+        const int nx = int(w & 0x3FF), ny = int((w >> 10) & 0x1FF);
+        if (recording && (nx != displayX || ny != displayY)) {
+            // the frame drawn since the last flip is now the one on screen (see FrameInterpolator)
+            GpuCmd f;
+            f.kind = GpuCmd::Kind::Flip;
+            f.rx = int16_t(nx); f.ry = int16_t(ny); f.rw = int16_t(hres); f.rh = int16_t(vres);
+            cmds.push_back(f);
+        }
+        displayX = nx; displayY = ny;
+        noteFramebuffer(displayX, displayY, hres, vres);
+        break;
+    }
     case 0x08: {
         static const int hr[4] = {256, 320, 512, 640};
         hres = (w & 0x40) ? 368 : hr[w & 3];

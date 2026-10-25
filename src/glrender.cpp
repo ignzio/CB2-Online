@@ -246,6 +246,49 @@ void HiResRenderer::render(Gpu& gpu) {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RED_INTEGER, GL_UNSIGNED_SHORT, gpu.vram.data());
 
+    textHres = gpu.hres;
+    replay(gpu.cmds, gpu.textPool, &gpu.cmdPool);
+
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gpu.cmds.clear();
+    gpu.cmdPool.clear();
+    gpu.textPool.clear();
+}
+
+// An in-between picture (see interp.hpp): the same replay into a second target, with the VRAM texture as the last render() left it.
+void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& texts, int hres) {
+    textHres = hres;
+    if (!midFbo) {
+        glGenTextures(1, &midTex);
+        glBindTexture(GL_TEXTURE_2D, midTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, textureWidth(), textureHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glGenFramebuffers(1, &midFbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, midTex, 0);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
+    glViewport(0, 0, textureWidth(), textureHeight());
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glEnable(GL_SCISSOR_TEST);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, vramTex);
+    replay(cmds, texts, nullptr);
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void HiResRenderer::replay(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& texts, const std::vector<uint16_t>* pool) {
     cur = State{};
     batch.clear();
     auto want = [&](int blend, const int16_t* area) {
@@ -255,24 +298,26 @@ void HiResRenderer::render(Gpu& gpu) {
         if (s != cur) { flush(); cur = s; }
     };
     static const int16_t kFull[4] = {0, 0, 1023, 511};
-    for (const GpuCmd& c : gpu.cmds) {
+    for (const GpuCmd& c : cmds) {
         switch (c.kind) {
         case GpuCmd::Kind::Fill:
             want(-1, kFull);
             pushQuad(float(c.rx), float(c.ry), float(c.rx + c.rw), float(c.ry + c.rh), c.color);
             break;
+        case GpuCmd::Kind::Flip: break;
         case GpuCmd::Kind::Upload:
+            if (!pool) break;
             flush();
-            blit(c, gpu.cmdPool.data() + c.poolOffset);
+            blit(c, pool->data() + c.poolOffset);
             cur = State{};
             cur.blend = -2;  // force the state to be re-applied
             break;
         case GpuCmd::Kind::Text: {
             // 2 x 3 console pixels per font pixel; the tag is centred on x and sits above y
             want(-1, kFull);
-            const std::string& s = gpu.textPool[c.poolOffset];
+            const std::string& s = texts[c.poolOffset];
             // glyph pixels are square on the 4:3 picture whatever the console's horizontal resolution
-            const float px = std::max(1.0f, float(gpu.hres) / 320.0f), py = 1.0f;
+            const float px = std::max(1.0f, float(textHres) / 320.0f), py = 1.0f;
             const float w = (float(s.size()) * 6.0f + 1.0f) * px, h = 9.0f * py;
             const float x0 = c.x[0] - w * 0.5f, y0 = c.y[0] - h;
             pushQuad(x0 - 1, y0 - 1, x0 + w + 1, y0 + h + 1, 0x000000);
@@ -300,24 +345,18 @@ void HiResRenderer::render(Gpu& gpu) {
         }
     }
     flush();
-    if (std::getenv("CB2_GLDEBUG")) {
+    if (pool && std::getenv("CB2_GLDEBUG")) {
         int cnt[2][2][5] = {};
-        for (const GpuCmd& c : gpu.cmds) if (c.kind == GpuCmd::Kind::Tri) ++cnt[c.textured][c.raw][c.semi ? c.semiMode : 4];
+        for (const GpuCmd& c : cmds) if (c.kind == GpuCmd::Kind::Tri) ++cnt[c.textured][c.raw][c.semi ? c.semiMode : 4];
         for (int t = 0; t < 2; ++t) for (int r = 0; r < 2; ++r) for (int m = 0; m < 5; ++m) if (cnt[t][r][m]) std::printf("[gl] textured=%d raw=%d %s=%d : %d\n", t, r, m == 4 ? "opaque" : "semi", m == 4 ? 0 : m, cnt[t][r][m]);
     }
-    glDisable(GL_BLEND);
-    glDisable(GL_SCISSOR_TEST);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    gpu.cmds.clear();
-    gpu.cmdPool.clear();
-    gpu.textPool.clear();
 }
 
-void HiResRenderer::readDisplay(const Gpu& gpu, std::vector<uint32_t>& rgba, int& w, int& h) const {
+void HiResRenderer::readDisplay(const Gpu& gpu, std::vector<uint32_t>& rgba, int& w, int& h, bool mid) const {
     w = gpu.hres * scaleFactor;
     h = gpu.vres * scaleFactor;
     std::vector<uint32_t> raw(size_t(w) * size_t(h));
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, mid && midFbo ? midFbo : fbo);
     glReadPixels(gpu.displayX * scaleFactor, gpu.displayY * scaleFactor, w, h, GL_RGBA, GL_UNSIGNED_BYTE, raw.data());
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     rgba.resize(raw.size());

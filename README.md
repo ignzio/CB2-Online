@@ -72,7 +72,7 @@ scripted run and saves one. States are not portable between versions that change
 memory card saves, and they only work with the normal (interpreter) engine. `cb2_statetest` checks that a loaded state replays
 identically.
 
-**In-game menu (`Esc`).** Pauses the game. Pages: *Sound and picture* (volume slider, display filter, fullscreen), *Online* (name tags,
+**In-game menu (`Esc`).** Pauses the game. Pages: *Sound and picture* (volume slider, display filter, fullscreen, **60 fps smoothing**, vsync, level timer), *Online* (name tags,
 an **opacity slider** for the other players' Crashes, the player list), *Controls*, *Main menu* (starts a fresh copy at the lobby; unsaved
 progress is lost) and *Quit*. It works with keyboard, game pad and mouse: arrows / D-pad / hover to pick, Enter / A / click to choose,
 Left-Right or dragging to move a slider, Esc / B / right click to go back, mouse wheel to scroll. Online, the others see you stand still
@@ -89,6 +89,9 @@ then press the new key or game pad button. A key or button already in use swaps 
 **Level times.** A timer at the top right (`F4`, or *Level timer* in the menu) times each level from the moment Crash can move until the
 game leaves it. Finished runs are saved as personal records in `records.txt` next to the exe and listed on the *Records* page of the menu;
 everybody in the room sees your best time and your latest finish in the player list. See [docs/SPEEDRUN.md](docs/SPEEDRUN.md).
+
+**Smoothness.** *Esc → Sound and picture → 60 fps smoothing* draws a picture between every two frames of the 30 fps game; the emulator also skips
+the engine's idle waiting, so it uses about half the CPU it did. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 The picture is drawn by an OpenGL renderer at `--scale N` (default 4) times the original resolution. Projected
 vertices keep their unrounded GTE positions, so geometry does not wobble at high resolution (`CB2_NOPRECISE=1`

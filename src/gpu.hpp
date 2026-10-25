@@ -14,7 +14,7 @@ struct StateAccess;   // save states (savestate.cpp)
 // One drawing operation as the game issued it, for renderers that replay the frame on the host GPU at a higher
 // resolution. The software rasteriser still maintains the exact VRAM (textures and render-to-texture effects read it).
 struct GpuCmd {
-    enum class Kind : uint8_t { Tri, Fill, Upload, Text } kind = Kind::Tri;
+    enum class Kind : uint8_t { Tri, Fill, Upload, Text, Flip } kind = Kind::Tri;
     // Tri: screen-space vertices in VRAM pixels (draw offset already applied), texel coordinates, vertex colours.
     float x[3] = {}, y[3] = {}, u[3] = {}, v[3] = {};
     uint8_t col[3][3] = {};
@@ -23,7 +23,7 @@ struct GpuCmd {
     uint16_t clutX = 0, clutY = 0;
     uint8_t alpha = 255;                   // Tri: opacity the host renderer gives it (other players' Crashes, see markAlpha); 255 = the game's own look
     int16_t area[4] = {};                  // draw area x0 y0 x1 y1 (inclusive)
-    // Fill / Upload: VRAM rectangle. Upload carries the final pixels (offset into Gpu::cmdPool).
+    // Fill / Upload: VRAM rectangle. Upload carries the final pixels (offset into Gpu::cmdPool). Flip: the display area moved to rx, ry (size rw x rh).
     int16_t rx = 0, ry = 0, rw = 0, rh = 0;
     uint32_t color = 0, poolOffset = 0;   // Text: x[0], y[0] = centre of the text in VRAM pixels, poolOffset = index in Gpu::textPool, color = rgb
 };
