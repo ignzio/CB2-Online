@@ -90,8 +90,9 @@ then press the new key or game pad button. A key or button already in use swaps 
 game leaves it. Finished runs are saved as personal records in `records.txt` next to the exe and listed on the *Records* page of the menu;
 everybody in the room sees your best time and your latest finish in the player list. See [docs/SPEEDRUN.md](docs/SPEEDRUN.md).
 
-**Smoothness.** *Esc → Sound and picture → 60 fps smoothing* draws a picture between every two frames of the 30 fps game; the emulator also skips
-the engine's idle waiting, so it uses about half the CPU it did. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+**Smoothness.** *Esc → Sound and picture → 60 fps smoothing* draws a picture between every two frames of the 30 fps game, *Textures → Smooth* filters
+the textures instead of showing blocky texels; the emulator also skips the engine's idle waiting, so it uses about half the CPU it did. See
+[docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 The picture is drawn by an OpenGL renderer at `--scale N` (default 4) times the original resolution. Projected
 vertices keep their unrounded GTE positions, so geometry does not wobble at high resolution (`CB2_NOPRECISE=1`

@@ -24,14 +24,26 @@ public:
     };
     struct Stats { size_t triangles = 0, matched = 0; };
 
-    // Called once per pass of the main loop with the commands recorded in it (before the renderer clears them) and the number of vertical blanks so far.
-    // Returns true when a flip happened in this pass: a new frame is on screen.
-    bool feed(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& textPool, uint64_t vblanks);
+    // Called once per pass of the main loop with the commands recorded in it (before the renderer clears them). Returns true when a flip happened in this
+    // pass: a new frame is on screen. The flips carry the number of the vertical blank they happened after, which is what the frame period is measured in.
+    bool feed(const std::vector<GpuCmd>& cmds, const std::vector<std::string>& textPool);
+    // The vertical blank (mod 2^32) the newest flip happened after.
+    uint32_t flipStamp() const { return lastFlipAt; }
     // The frame that just flipped in can be preceded by an in-between picture: a previous frame exists, both are usable and the game is running at
     // one picture per two vertical blanks (otherwise there is no gap to fill).
     bool canInterpolate() const { return flipped && prev.usable && cur.usable && havePrev && period == 2 && prev.w == cur.w && prev.h == cur.h; }
     // The picture `t` of the way from the newest frame (0) back to the one before it (1), in the newest frame's coordinates and drawing order.
     void build(float t, std::vector<GpuCmd>& out, std::vector<std::string>& texts, Stats* stats = nullptr) const;
+    // Why the newest flip has no in-between picture (for logs): "" when it has one.
+    const char* whyNot() const {
+        if (!flipped) return "no flip";
+        if (!havePrev) return "first frame";
+        if (!prev.usable) return "previous frame has uploads";
+        if (!cur.usable) return "frame has uploads";
+        if (period != 2) return period < 2 ? "period 1" : "period 3 or more";
+        if (prev.w != cur.w || prev.h != cur.h) return "display size changed";
+        return "";
+    }
     void reset() { *this = FrameInterpolator(); }
 
     // Largest distance (VRAM pixels) a vertex may have moved between two frames for the triangles to count as the same one, and the largest
@@ -41,8 +53,8 @@ public:
 private:
     Frame acc, cur, prev;
     bool havePrev = false, flipped = false, started = false;
-    uint64_t lastFlipAt = 0;
-    uint64_t period = 0;   // vertical blanks between the last two flips
+    uint32_t lastFlipAt = 0;
+    uint32_t period = 0;   // vertical blanks between the last two flips
 };
 
 }  // namespace psx

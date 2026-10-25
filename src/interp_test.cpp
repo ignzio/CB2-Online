@@ -20,9 +20,10 @@ static GpuCmd tri(float x, float y, float u, float size = 10) {
     return c;
 }
 
-static GpuCmd flip(int x, int y) {
+static GpuCmd flip(int x, int y, uint32_t stamp) {
     GpuCmd f;
     f.kind = GpuCmd::Kind::Flip;
+    f.color = stamp;
     f.rx = int16_t(x); f.ry = int16_t(y); f.rw = 512; f.rh = 240;
     return f;
 }
@@ -43,12 +44,12 @@ int main() {
 
     // Frame A is drawn, flips in at vblank 10; frame B (the other buffer, moved by 6 pixels) is drawn and flips in at vblank 12.
     auto a = frame(512, 0, 5);
-    a.push_back(flip(512, 0));
-    CHECK(fi.feed(a, none, 10));
+    a.push_back(flip(512, 0, 10));
+    CHECK(fi.feed(a, none));
     CHECK(!fi.canInterpolate());   // nothing before it yet
     auto b = frame(0, 6, 5);
-    b.push_back(flip(0, 0));
-    CHECK(fi.feed(b, none, 12));
+    b.push_back(flip(0, 0, 12));
+    CHECK(fi.feed(b, none));
     CHECK(fi.canInterpolate());
 
     FrameInterpolator::Stats st;
@@ -72,40 +73,40 @@ int main() {
 
     // a frame period of one blank leaves no gap
     auto c1 = frame(512, 12, 5);
-    c1.push_back(flip(512, 0));
-    CHECK(fi.feed(c1, none, 13));
+    c1.push_back(flip(512, 0, 13));
+    CHECK(fi.feed(c1, none));
     CHECK(!fi.canInterpolate());
     // a frame period of three blanks does not either
     auto c2 = frame(0, 18, 5);
-    c2.push_back(flip(0, 0));
-    CHECK(fi.feed(c2, none, 16));
+    c2.push_back(flip(0, 0, 16));
+    CHECK(fi.feed(c2, none));
     CHECK(!fi.canInterpolate());
     auto c3 = frame(512, 24, 5);
-    c3.push_back(flip(512, 0));
-    CHECK(fi.feed(c3, none, 18));
+    c3.push_back(flip(512, 0, 18));
+    CHECK(fi.feed(c3, none));
     CHECK(fi.canInterpolate());
 
     // a pass without a flip is not a new frame; the commands wait for the next flip, even across passes
     auto d1 = frame(0, 30, 3);
-    CHECK(!fi.feed(d1, none, 19));
+    CHECK(!fi.feed(d1, none));
     CHECK(!fi.canInterpolate());
     auto d2 = frame(0, 30, 2, false);
     d2.erase(d2.begin(), d2.begin() + 0);
-    d2.push_back(flip(0, 0));
-    CHECK(fi.feed(d2, none, 20));
+    d2.push_back(flip(0, 0, 20));
+    CHECK(fi.feed(d2, none));
     CHECK(fi.canInterpolate());
     fi.build(0.5f, out, texts, &st);
     CHECK(st.triangles == 5);   // 3 + 2
 
     // triangles that jumped far, or have no partner, stay where the newest frame has them
     auto e1 = frame(512, 0, 4);
-    e1.push_back(flip(512, 0));
-    fi.feed(e1, none, 22);
+    e1.push_back(flip(512, 0, 22));
+    fi.feed(e1, none);
     auto e2 = frame(0, 0, 4);
     e2[2].x[0] += 300; e2[2].x[1] += 300; e2[2].x[2] += 300;   // far away
     e2.push_back(tri(400, 100, 99));                           // new
-    e2.push_back(flip(0, 0));
-    fi.feed(e2, none, 24);
+    e2.push_back(flip(0, 0, 24));
+    fi.feed(e2, none);
     CHECK(fi.canInterpolate());
     fi.build(0.5f, out, texts, &st);
     CHECK(st.triangles == 5 && st.matched == 3);
@@ -116,16 +117,49 @@ int main() {
     up.kind = GpuCmd::Kind::Upload;
     auto f1 = frame(512, 0, 3);
     f1.push_back(up);
-    f1.push_back(flip(512, 0));
-    fi.feed(f1, none, 26);
+    f1.push_back(flip(512, 0, 26));
+    fi.feed(f1, none);
     auto f2 = frame(0, 3, 3);
-    f2.push_back(flip(0, 0));
-    fi.feed(f2, none, 28);
+    f2.push_back(flip(0, 0, 28));
+    fi.feed(f2, none);
     CHECK(!fi.canInterpolate());   // the previous frame had an upload
     auto f3 = frame(512, 6, 3);
-    f3.push_back(flip(512, 0));
-    fi.feed(f3, none, 30);
+    f3.push_back(flip(512, 0, 30));
+    fi.feed(f3, none);
     CHECK(fi.canInterpolate());
+
+    // a polygon that is a sliver in one frame and a big shape in the other is not moved into the other
+    auto h2 = frame(0, 0, 1);
+    h2[1].y[2] = h2[1].y[0] + 0.5f;   // squashed to a sliver, same texture
+    h2.push_back(flip(0, 0, 38));
+    auto h1 = frame(512, 0, 1);
+    h1[1].x[1] += 60; h1[1].y[2] += 60; h1[1].x[2] += 30;   // big in the earlier frame
+    h1.push_back(flip(512, 0, 36));
+    fi.reset();
+    fi.feed(h1, none);
+    fi.feed(h2, none);
+    CHECK(fi.canInterpolate());
+    fi.build(0.5f, out, texts, &st);
+    CHECK(st.triangles == 1 && st.matched == 0);
+
+    // a triangle without a partner follows the corners it shares with a matched one, so no gap opens between them
+    {
+        FrameInterpolator f2;
+        std::vector<GpuCmd> p1 = {tri(612, 100, 0)};   // the buffer at x = 512: the triangle sits at (100, 100) on screen
+        p1.push_back(flip(512, 0, 40));
+        f2.feed(p1, none);
+        GpuCmd b = tri(116, 100, 40);                  // new, no partner; its first corner is the second corner of the moved triangle below
+        b.x[1] = 130; b.y[1] = 100; b.x[2] = 116; b.y[2] = 118;
+        std::vector<GpuCmd> p2 = {tri(106, 100, 0), b};   // the same triangle 6 pixels to the right
+        p2.push_back(flip(0, 0, 42));
+        f2.feed(p2, none);
+        CHECK(f2.canInterpolate());
+        f2.build(0.5f, out, texts, &st);
+        CHECK(st.triangles == 2 && st.matched == 1);
+        CHECK(std::fabs(out[0].x[1] - 113.0f) < 1e-3f);   // matched: half way back
+        CHECK(std::fabs(out[1].x[0] - 113.0f) < 1e-3f);   // the neighbour's shared corner moves with it
+        CHECK(std::fabs(out[1].x[1] - 130.0f) < 1e-3f && std::fabs(out[1].x[2] - 116.0f) < 1e-3f);   // its own corners stay
+    }
 
     // text (name tags) moves with its string
     GpuCmd tag;
@@ -134,14 +168,14 @@ int main() {
     tag.x[0] = 100; tag.y[0] = 50;
     auto g1 = frame(0, 0, 2);
     g1.push_back(tag);
-    g1.push_back(flip(0, 0));
-    fi.feed(g1, {"ALICE"}, 32);
+    g1.push_back(flip(0, 0, 32));
+    fi.feed(g1, {"ALICE"});
     GpuCmd tag2 = tag;
     tag2.x[0] = 512 + 108; tag2.y[0] = 54;
     auto g2 = frame(512, 8, 2);
     g2.push_back(tag2);
-    g2.push_back(flip(512, 0));
-    fi.feed(g2, {"ALICE"}, 34);
+    g2.push_back(flip(512, 0, 34));
+    fi.feed(g2, {"ALICE"});
     fi.build(0.5f, out, texts);
     CHECK(out.back().kind == GpuCmd::Kind::Text && texts[out.back().poolOffset] == "ALICE");
     CHECK(std::fabs(out.back().x[0] - (512 + 104)) < 1e-3f && std::fabs(out.back().y[0] - 52) < 1e-3f);

@@ -135,7 +135,9 @@ void Gpu::gp1(uint32_t w) {
             GpuCmd f;
             f.kind = GpuCmd::Kind::Flip;
             f.rx = int16_t(nx); f.ry = int16_t(ny); f.rw = int16_t(hres); f.rh = int16_t(vres);
+            f.color = uint32_t(vblankCount);
             cmds.push_back(f);
+            ++flipCount;
         }
         displayX = nx; displayY = ny;
         noteFramebuffer(displayX, displayY, hres, vres);

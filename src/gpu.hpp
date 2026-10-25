@@ -23,7 +23,7 @@ struct GpuCmd {
     uint16_t clutX = 0, clutY = 0;
     uint8_t alpha = 255;                   // Tri: opacity the host renderer gives it (other players' Crashes, see markAlpha); 255 = the game's own look
     int16_t area[4] = {};                  // draw area x0 y0 x1 y1 (inclusive)
-    // Fill / Upload: VRAM rectangle. Upload carries the final pixels (offset into Gpu::cmdPool). Flip: the display area moved to rx, ry (size rw x rh).
+    // Fill / Upload: VRAM rectangle. Upload carries the final pixels (offset into Gpu::cmdPool). Flip: the display area moved to rx, ry (size rw x rh) after vertical blank number "color".
     int16_t rx = 0, ry = 0, rw = 0, rh = 0;
     uint32_t color = 0, poolOffset = 0;   // Text: x[0], y[0] = centre of the text in VRAM pixels, poolOffset = index in Gpu::textPool, color = rgb
 };
@@ -91,7 +91,9 @@ public:
     uint32_t read();
     void dmaWrite(const uint32_t* words, uint32_t n) { for (uint32_t i = 0; i < n; ++i) gp0(words[i]); }
     uint32_t dmaRead() { return read(); }
-    void vblank() { field ^= 1; }
+    void vblank() { field ^= 1; ++vblankCount; }
+    uint64_t vblankCount = 0;   // vertical blanks so far (stamped into the Flip commands)
+    uint64_t flipCount = 0;     // display flips recorded so far
     int dmaDirection() const { return dir; }
 
 private:

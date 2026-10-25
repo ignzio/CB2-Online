@@ -37,6 +37,7 @@ bool Config::load(const std::string& exeDir) {
             else if (k == "filter") filter = std::max(0, std::min(2, std::atoi(v.c_str())));
             else if (k == "opacity") opacity = std::max(10, std::min(100, std::atoi(v.c_str())));
             else if (k == "timer") timer = !(v == "off" || v == "0" || v == "no" || v == "false");
+            else if (k == "textures") textures = (v == "smooth" || v == "1") ? 1 : 0;
             else if (k == "smooth") smooth = (v == "on" || v == "1" || v == "yes" || v == "true");
             else if (k == "vsync") vsync = !(v == "off" || v == "0" || v == "no" || v == "false");
             else if (k == "roster") roster = !(v == "off" || v == "0" || v == "no" || v == "false");

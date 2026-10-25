@@ -327,7 +327,7 @@ std::string Platform::run(uint64_t count) {
         return gameState == GameState::Finished ? lastError : std::string();
     }
     try {
-        if (serviceAt > cycles + 64) serviceAt = cycles;   // stale: a saved state was loaded
+        if (serviceAt > cycles + 64) serviceAt = 0;   // a saved state from earlier was loaded: the grid (multiples of 64) starts over, as on a fresh console
         for (uint64_t i = 0; i < count; ++i) {
             if (cycles >= serviceAt) { service(); serviceAt += 64 * ((cycles - serviceAt) / 64 + 1); }
             if ((istat & imask) && hookBuf && !saved.valid && (cpu.cop0[12] & 1) && cpu.nextPc == cpu.pc + 4) enterInterrupt();

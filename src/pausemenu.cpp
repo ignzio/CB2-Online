@@ -65,7 +65,7 @@ std::vector<PauseMenu::Item> PauseMenu::items() const {
         v.push_back(kQuit);
         return v;
     }
-    case Page::Sound: return {kVolume, kFilter, kFullscreen, kSmooth, kVsync, kTimer, kBack};
+    case Page::Sound: return {kVolume, kFilter, kTextures, kFullscreen, kSmooth, kVsync, kTimer, kBack};
     case Page::Online: return {kTags, kOpacity, kRoster, kBack};
     default: return {};
     }
@@ -88,6 +88,7 @@ void PauseMenu::adjust(Item item, int d) {
     case kTags: s->nameTags = !s->nameTags; changed = true; break;
     case kRoster: s->roster = !s->roster; changed = true; break;
     case kTimer: s->timer = !s->timer; changed = true; break;
+    case kTextures: s->textures = 1 - s->textures; changed = true; break;
     case kSmooth: s->smooth = !s->smooth; changed = true; break;
     case kVsync: s->vsync = !s->vsync; changed = true; break;
     default: break;
@@ -113,7 +114,7 @@ void PauseMenu::activate(Item item) {
     case kMainMenu: mainSel = sel; page = Page::ConfirmMenu; confirmSel = 1; break;
     case kQuit: mainSel = sel; page = Page::ConfirmQuit; confirmSel = 1; break;
     case kBack: setPage(Page::Main); break;
-    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: adjust(item, 1); break;
+    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: case kTextures: adjust(item, 1); break;
     default: break;
     }
 }
@@ -309,8 +310,10 @@ void PauseMenu::draw(double t) {
         const auto list = items();
         sel = std::min(sel, int(list.size()) - 1);
         barX = 262; barW = 144;
-        float y = 112;
-        for (size_t i = 0; i < list.size(); ++i, y += 44) {
+        const bool tight = list.size() > 7;   // eight rows must still clear the hint line at the bottom
+        const float step = tight ? 41.0f : 44.0f;
+        float y = tight ? 98.0f : 112.0f;
+        for (size_t i = 0; i < list.size(); ++i, y += step) {
             const bool on = int(i) == sel;
             const int idx = int(i);
             switch (list[i]) {
@@ -337,6 +340,7 @@ void PauseMenu::draw(double t) {
             case kFilter: valueRow(idx, y, on, "PICTURE", filterName(s->filter), kTeal); break;
             case kFullscreen: valueRow(idx, y, on, "FULLSCREEN", ctx.isFullscreen && ctx.isFullscreen() ? "ON" : "OFF", kTeal); break;
             case kTimer: valueRow(idx, y, on, "LEVEL TIMER", s->timer ? "ON" : "OFF", kTeal); break;
+            case kTextures: valueRow(idx, y, on, "TEXTURES", s->textures ? "SMOOTH" : "SHARP", kTeal); break;
             case kSmooth: valueRow(idx, y, on, "60 FPS SMOOTHING", s->smooth ? "ON" : "OFF", kTeal); break;
             case kVsync: valueRow(idx, y, on, "VSYNC", s->vsync ? "ON" : "OFF", kTeal); break;
             case kTags: valueRow(idx, y, on, "NAME TAGS", s->nameTags ? "ON" : "OFF", kTeal); break;

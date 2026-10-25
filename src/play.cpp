@@ -205,6 +205,7 @@ int main(int argc, char** argv) {
         }
         else if (!std::strcmp(argv[i], "--autostart")) autoStart = true;
         else if (!std::strcmp(argv[i], "--smooth")) forceSmooth = true;
+        else if (!std::strcmp(argv[i], "--textures") && more) cfg.textures = std::strcmp(argv[++i], "smooth") == 0 || std::strcmp(argv[i], "1") == 0 ? 1 : 0;
         else if (!std::strcmp(argv[i], "--smooth-t") && more) smoothT = float(std::atof(argv[++i]));
         else if (!std::strcmp(argv[i], "--capture-mid")) { captureMid = true; forceSmooth = true; }
         else if (!std::strcmp(argv[i], "--window-capture")) windowCapture = true;   // with --capture: save the window's own picture
@@ -420,7 +421,8 @@ int main(int argc, char** argv) {
         }
     }
     bool frameReady = false;
-    p.onVblank = [&] { frameReady = true; mp.tick(); };
+    uint64_t flipsAtVblank = 0, instructionsAtVblank = 0;   // for 60 fps smoothing: the flip belonging to a vertical blank comes a little after it
+    p.onVblank = [&] { frameReady = true; flipsAtVblank = p.gpu.flipCount; instructionsAtVblank = p.cpu.instructions; mp.tick(); };
     // settings of the in-game menu (Esc), kept in cb2.cfg
     cb2menu::Settings settings;
     settings.volume = cfg.volume;
@@ -430,6 +432,7 @@ int main(int argc, char** argv) {
     settings.roster = cfg.roster;
     settings.timer = cfg.timer;
     settings.smooth = cfg.smooth || forceSmooth;
+    settings.textures = cfg.textures;
     settings.vsync = cfg.vsync;
     psx::FrameInterpolator interp;
     std::vector<psx::GpuCmd> midCmds;
@@ -487,6 +490,7 @@ int main(int argc, char** argv) {
         cfg.remember(exeDir, "opacity", std::to_string(settings.opacity));
         cfg.remember(exeDir, "roster", settings.roster ? "on" : "off");
         cfg.remember(exeDir, "timer", settings.timer ? "on" : "off");
+        cfg.remember(exeDir, "textures", settings.textures ? "smooth" : "sharp");
         cfg.remember(exeDir, "smooth", settings.smooth ? "on" : "off");
         cfg.remember(exeDir, "vsync", settings.vsync ? "on" : "off");
         for (int i = 0; i < cb2input::kBindingCount; ++i) {
@@ -668,6 +672,13 @@ int main(int argc, char** argv) {
         for (int step = 0; step < std::min(int(due), 4) && err.empty(); ++step) {
             frameReady = false;
             while (!frameReady && err.empty()) err = p.run(20000);
+            // With smoothing the picture is chosen by the display flip, which comes some thousands of instructions after the vertical blank: keep running until it has
+            // (a pass that ended just before it would see the flip one pass late and lose its in-between picture).
+            if (settings.smooth && useHires && !p.nativeEnabled() && err.empty()) {
+                for (int slice = 0; slice < 10 && err.empty() && p.gpu.flipCount == flipsAtVblank; ++slice) err = p.run(2000);
+                static const bool smoothLog3 = std::getenv("CB2_SMOOTHLOG") != nullptr;
+                if (smoothLog3 && p.gpu.flipCount != flipsAtVblank) std::printf("[smooth] flip %llu instructions after the vertical blank\n", (unsigned long long)(p.cpu.instructions - instructionsAtVblank));
+            }
         }
         msRun += since(runBegan);
         }
@@ -713,10 +724,15 @@ int main(int argc, char** argv) {
             const auto renderBegan = std::chrono::steady_clock::now();
             // 60 fps smoothing: the commands of this pass are kept for the interpolator before the renderer consumes them
             bool flipped = false;
-            if (useHires && settings.smooth && showHires) flipped = interp.feed(p.gpu.cmds, p.gpu.textPool, p.frames);
+            if (useHires && settings.smooth && showHires) flipped = interp.feed(p.gpu.cmds, p.gpu.textPool);
             else interp.reset();
+            hires.setTextureFilter(settings.textures);
             if (useHires) hires.render(p.gpu);
-            if (flipped && interp.canInterpolate()) {
+            if (flipped && !interp.canInterpolate()) {
+                static const bool smoothLog2 = std::getenv("CB2_SMOOTHLOG") != nullptr;
+                if (smoothLog2) std::printf("[smooth] frame %llu: no in-between picture (%s)\n", (unsigned long long)p.frames, interp.whyNot());
+            }
+            if (flipped && interp.canInterpolate() && interp.flipStamp() == uint32_t(p.gpu.vblankCount)) {   // the flip belongs to this very vertical blank
                 psx::FrameInterpolator::Stats st;
                 interp.build(smoothT, midCmds, midTexts, &st);
                 hires.renderMid(midCmds, midTexts, p.gpu.hres);

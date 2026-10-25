@@ -16,9 +16,10 @@ layout(location=1) in vec2 uv;
 layout(location=2) in vec3 col;
 layout(location=3) in ivec4 a;
 layout(location=4) in ivec4 b;
-out vec2 vUv; out vec3 vCol; flat out ivec4 vA; flat out ivec4 vB;
+layout(location=5) in vec4 bounds;
+out vec2 vUv; out vec3 vCol; flat out ivec4 vA; flat out ivec4 vB; flat out vec4 vBounds;
 void main() {
-    vUv = uv; vCol = col; vA = a; vB = b;
+    vUv = uv; vCol = col; vA = a; vB = b; vBounds = bounds;
     gl_Position = vec4(pos.x / 1024.0 * 2.0 - 1.0, pos.y / 512.0 * 2.0 - 1.0, 0.0, 1.0);
 }
 )";
@@ -26,34 +27,58 @@ void main() {
 // a = (page x, page y, depth, flags: 1 textured, 2 raw, 4 opaque texels only, 8 semi-transparent texels only, bits 16..23 opacity 1..254 (0 = solid))
 // b = (clut x, clut y, window mask x | y << 8, window offset x | y << 8)
 const char* kMainFrag = R"(#version 330 core
-in vec2 vUv; in vec3 vCol; flat in ivec4 vA; flat in ivec4 vB;
+in vec2 vUv; in vec3 vCol; flat in ivec4 vA; flat in ivec4 vB; flat in vec4 vBounds;
 out vec4 o;
 uniform usampler2D vram;
+uniform int texFilter;   // 0 nearest (the console's own look), 1 bilinear
 uint fetch(int x, int y) { return texelFetch(vram, ivec2(x & 1023, y & 511), 0).r; }
+// One texel of the polygon's texture page (palette and texture window applied); 0 = transparent.
+uint texel(int u, int v) {
+    u &= 255; v &= 255;
+    int mx = vB.z & 255, my = (vB.z >> 8) & 255, ox = vB.w & 255, oy = (vB.w >> 8) & 255;
+    u = (u & ~(mx * 8)) | ((ox & mx) * 8);
+    v = (v & ~(my * 8)) | ((oy & my) * 8);
+    int base = vA.x * 64, row = vA.y * 256 + v;
+    if (vA.z == 0) {
+        uint w = fetch(base + u / 4, row);
+        return fetch(vB.x + int((w >> uint((u & 3) * 4)) & 15u), vB.y);
+    } else if (vA.z == 1) {
+        uint w = fetch(base + u / 2, row);
+        return fetch(vB.x + int((w >> uint((u & 1) * 8)) & 255u), vB.y);
+    }
+    return fetch(base + u, row);
+}
+vec3 rgb555(uint t) { return vec3(float(t & 31u), float((t >> 5) & 31u), float((t >> 10) & 31u)) / 31.0; }
 void main() {
     vec3 c = vCol;
     if ((vA.w & 1) != 0) {
-        int u = int(floor(vUv.x + 0.002)) & 255;
-        int v = int(floor(vUv.y + 0.002)) & 255;
-        int mx = vB.z & 255, my = (vB.z >> 8) & 255, ox = vB.w & 255, oy = (vB.w >> 8) & 255;
-        u = (u & ~(mx * 8)) | ((ox & mx) * 8);
-        v = (v & ~(my * 8)) | ((oy & my) * 8);
-        int base = vA.x * 64, row = vA.y * 256 + v;
-        uint t;
-        if (vA.z == 0) {
-            uint w = fetch(base + u / 4, row);
-            t = fetch(vB.x + int((w >> uint((u & 3) * 4)) & 15u), vB.y);
-        } else if (vA.z == 1) {
-            uint w = fetch(base + u / 2, row);
-            t = fetch(vB.x + int((w >> uint((u & 1) * 8)) & 255u), vB.y);
+        int u = int(floor(vUv.x + 0.002));
+        int v = int(floor(vUv.y + 0.002));
+        uint t = texel(u, v);
+        vec3 tc;
+        if (texFilter == 0) {
+            if (t == 0u) discard;
+            tc = rgb555(t);
         } else {
-            t = fetch(base + u, row);
+            // four texels around the sample point, weighted; transparent ones do not count (so edges of cut-outs stay clean) and the
+            // texel indices stay inside the polygon's own texture coordinates (no bleeding from the neighbouring picture in the page)
+            vec2 p = vUv - 0.5;
+            ivec2 i0 = ivec2(floor(p));
+            vec2 f = p - vec2(i0);
+            ivec2 lo = ivec2(floor(vBounds.xy)), hi = ivec2(max(ceil(vBounds.zw) - 1.0, floor(vBounds.xy)));
+            ivec2 a = clamp(i0, lo, hi), b = clamp(i0 + 1, lo, hi);
+            uint t00 = texel(a.x, a.y), t10 = texel(b.x, a.y), t01 = texel(a.x, b.y), t11 = texel(b.x, b.y);
+            float w00 = (1.0 - f.x) * (1.0 - f.y), w10 = f.x * (1.0 - f.y), w01 = (1.0 - f.x) * f.y, w11 = f.x * f.y;
+            float a00 = t00 == 0u ? 0.0 : w00, a10 = t10 == 0u ? 0.0 : w10, a01 = t01 == 0u ? 0.0 : w01, a11 = t11 == 0u ? 0.0 : w11;
+            float sum = a00 + a10 + a01 + a11;
+            if (sum < 0.5) discard;
+            tc = (rgb555(t00) * a00 + rgb555(t10) * a10 + rgb555(t01) * a01 + rgb555(t11) * a11) / sum;
+            t = f.x < 0.5 ? (f.y < 0.5 ? t00 : t01) : (f.y < 0.5 ? t10 : t11);   // the nearest texel decides the semi-transparency pass
+            if (t == 0u) t = t00 | t10 | t01 | t11;
         }
-        if (t == 0u) discard;
         bool semiTexel = (t & 0x8000u) != 0u;
         if ((vA.w & 4) != 0 && semiTexel) discard;
         if ((vA.w & 8) != 0 && !semiTexel) discard;
-        vec3 tc = vec3(float(t & 31u), float((t >> 5) & 31u), float((t >> 10) & 31u)) / 31.0;
         if ((vA.w & 2) == 0) tc = min(tc * vCol * 2.0, vec3(1.0));
         c = tc;
     }
@@ -61,7 +86,6 @@ void main() {
     o = vec4(c, ab == 0 ? 1.0 : float(ab) / 255.0);
 }
 )";
-
 const char* kBlitVert = R"(#version 330 core
 uniform vec4 rect; // x y w h in VRAM pixels
 out vec2 uv;
@@ -112,6 +136,7 @@ bool HiResRenderer::init(int scale) {
     mainProg = program(kMainVert, kMainFrag);
     blitProg = program(kBlitVert, kBlitFrag);
     mainVram = glGetUniformLocation(mainProg, "vram");
+    mainFilter = glGetUniformLocation(mainProg, "texFilter");
     blitRect = glGetUniformLocation(blitProg, "rect");
     blitTex = glGetUniformLocation(blitProg, "tex");
 
@@ -153,6 +178,7 @@ bool HiResRenderer::init(int scale) {
     glEnableVertexAttribArray(2); glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(offsetof(Vertex, r)));
     glEnableVertexAttribArray(3); glVertexAttribIPointer(3, 4, GL_INT, stride, reinterpret_cast<void*>(offsetof(Vertex, a)));
     glEnableVertexAttribArray(4); glVertexAttribIPointer(4, 4, GL_INT, stride, reinterpret_cast<void*>(offsetof(Vertex, b2)));
+    glEnableVertexAttribArray(5); glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(offsetof(Vertex, bounds)));
     glGenVertexArrays(1, &blitVao);
     return ok;
 }
@@ -178,6 +204,7 @@ void HiResRenderer::flush() {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, vramTex);
     glUniform1i(mainVram, 0);
+    glUniform1i(mainFilter, textureFilter);
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(batch.size() * sizeof(Vertex)), batch.data(), GL_STREAM_DRAW);
@@ -195,6 +222,8 @@ void HiResRenderer::pushTri(const GpuCmd& c, int passFlag) {
         v.b2[0] = c.clutX; v.b2[1] = c.clutY;
         v.b2[2] = c.twMX | (c.twMY << 8);
         v.b2[3] = c.twOX | (c.twOY << 8);
+        v.bounds[0] = std::min({c.u[0], c.u[1], c.u[2]}); v.bounds[1] = std::min({c.v[0], c.v[1], c.v[2]});
+        v.bounds[2] = std::max({c.u[0], c.u[1], c.u[2]}); v.bounds[3] = std::max({c.v[0], c.v[1], c.v[2]});
         batch.push_back(v);
     }
 }
@@ -272,13 +301,15 @@ void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector
         glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, midTex, 0);
     }
+    // start from the real picture: where the moved triangles leave a gap, the picture shows through instead of black
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, midFbo);
+    glBlitFramebuffer(0, 0, textureWidth(), textureHeight(), 0, 0, textureWidth(), textureHeight(), GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
     glViewport(0, 0, textureWidth(), textureHeight());
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
-    glDisable(GL_SCISSOR_TEST);
-    glClearColor(0, 0, 0, 1);
-    glClear(GL_COLOR_BUFFER_BIT);
     glEnable(GL_SCISSOR_TEST);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, vramTex);

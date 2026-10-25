@@ -7,10 +7,22 @@ the screen changes 60 times a second.
 
 How it works (`src/interp.cpp`): the host renderer replays what the game told the GPU to draw. The recorded commands of a frame are kept, and when the
 game flips to a new frame the previous and the new frame are compared: every triangle of the new one is looked up in the old one (same texture,
-texel coordinates, palette and colour - a polygon keeps those from frame to frame) and drawn half way between the two screen positions. The result is
-drawn into a second image, shown for one vertical blank, and then the real frame follows. Triangles with no partner, or that moved too far (a camera
-cut, a fade), are drawn where the new frame has them, so a cut never smears. Frames that contain framebuffer uploads (videos, loading pictures) are
-never interpolated, and neither are scenes that already run at 60 fps.
+texel coordinates, palette and colour - a polygon keeps those from frame to frame, and it must have a similar size and shape) and its corners are
+moved half way towards where the old one had them. The result is drawn into a second image (started from the real picture), shown for one vertical
+blank, and then the real frame follows.
+
+Two things keep it free of artefacts:
+
+- **One movement per corner.** Every screen position that is a corner of a matched triangle gets the *median* of the movements the triangles around it
+  found, and triangles that share that corner all use it. Neighbouring triangles of a surface therefore always move together: no cracks open between
+  them (they showed as black wedges along platform edges), a triangle matched to a wrong partner is outvoted, and a triangle without a partner follows
+  the corners it has in common with matched ones. Triangles that jumped far (a camera cut, a fade) are not matched and stay where the new frame has them.
+- **Exact timing.** Each display flip is stamped with the number of the vertical blank it happened after, and the main loop keeps running until the flip
+  after the current vertical blank has happened (it comes 3,000 to 23,000 instructions after it). Before this, a pass could end just before the flip,
+  the flip was seen one pass late and that frame lost its in-between picture: about a third of the frames were shown without one, which looked like
+  stutter. Now 99% of the flips get one (`CB2_SMOOTHLOG=1` lists those that do not, with the reason).
+
+Frames that contain framebuffer uploads (videos, loading pictures) are never interpolated, and neither are scenes that already run at 60 fps.
 
 - **Cost:** about 0.2 ms per frame on top of the normal rendering, and **one vertical blank (16.7 ms) of extra delay**, because the in-between picture
   needs the new frame to exist. It is off by default.
@@ -19,6 +31,13 @@ never interpolated, and neither are scenes that already run at 60 fps.
 - **Check it yourself:** `cb2_play --capture-mid --smooth-t 0.5 --capture FRAME:out.png` saves an in-between picture (`--smooth-t 0` is the newest
   real frame: the program then also reports how many pixels differ from the real picture, which must be 0; `1` is the previous frame).
   `CB2_SMOOTHLOG=1` prints how many triangles were matched for each in-between picture. `cb2_interptest` tests the matching.
+
+## Textures (*Esc → Sound and picture → Textures*, `textures = smooth` in `cb2.cfg`)
+
+*Sharp* reads every texel as the console does (blocky when enlarged, the original look). *Smooth* filters the textures bilinearly in the renderer's
+shader (`src/glrender.cpp`): the four texels around each sample are blended, texels that are transparent do not take part (so the edges of cut-out
+sprites stay clean), and the texel indices stay inside the polygon's own texture coordinates, so nothing bleeds in from the neighbouring picture in the
+texture page. Palettes, the texture window and the semi-transparency passes work as before. `cb2_play --textures smooth` forces it for one run.
 
 ## Frame pacing and vsync
 
