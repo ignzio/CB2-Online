@@ -304,22 +304,42 @@ void HiResRenderer::blit(const GpuCmd& c, const uint16_t* px) {
     glEnable(GL_SCISSOR_TEST);
 }
 
-void HiResRenderer::drawNative(const int16_t* area) {
+void HiResRenderer::drawNativeExtras(const int16_t* area, const int16_t* offset) {
     flush();
     glEnable(GL_SCISSOR_TEST);
     glScissor(area[0] * scaleFactor, area[1] * scaleFactor, (area[2] - area[0] + 1) * scaleFactor, (area[3] - area[1] + 1) * scaleFactor);
     if (markCovered) glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-    nativeWorld->draw(*viewNow, scaleFactor, wide);
+    cb2::NativeView v = *viewNow;
+    v.ofx += float(offset[0]);
+    v.ofy += float(offset[1]);
+    nativeWorld->drawExtras(v, wide);
     glDisable(GL_BLEND);
     cur = State{};
     cur.blend = -2;   // the state the native pass left is unknown
+}
+
+// The scenery polygons the game drew one after another are drawn natively now, in the game's order and at the game's place among its other polygons.
+void HiResRenderer::flushNativeRun() {
+    if (nativeRun.empty()) return;
+    flush();
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(runArea[0] * scaleFactor, runArea[1] * scaleFactor, (runArea[2] - runArea[0] + 1) * scaleFactor, (runArea[3] - runArea[1] + 1) * scaleFactor);
+    if (markCovered) glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    cb2::NativeView v = *viewNow;
+    v.ofx += float(runOff[0]);
+    v.ofy += float(runOff[1]);
+    nativeWorld->drawRun(v, nativeRun, wide);
+    nativeRun.clear();
+    glDisable(GL_BLEND);
+    cur = State{};
+    cur.blend = -2;
 }
 
 void HiResRenderer::render(Gpu& gpu) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     viewNow = &viewMain;
     nativeActive = nativeWorld && nativeWorld->ready() && viewMain.valid;
-    nativeDrawn = false;
+    nativeRun.clear();
     if (nativeActive && !mainDepth) {
         glGenRenderbuffers(1, &mainDepth);
         glBindRenderbuffer(GL_RENDERBUFFER, mainDepth);
@@ -387,7 +407,7 @@ void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector
     glStencilFunc(GL_ALWAYS, 1, 0xFF);
     viewNow = &viewMid;
     nativeActive = nativeWorld && nativeWorld->ready() && viewMid.valid;
-    nativeDrawn = false;
+    nativeRun.clear();
     markCovered = true;
     replay(cmds, texts, nullptr);
     markCovered = false;
@@ -446,13 +466,25 @@ void HiResRenderer::replay(const std::vector<GpuCmd>& cmds, const std::vector<st
         if (s != cur) { flush(); cur = s; }
     };
     static const int16_t kFull[4] = {0, 0, 1023, 511};
-    for (const GpuCmd& c : cmds) {
+    bool nativeScanned = false;
+    for (size_t ci = 0; ci < cmds.size(); ++ci) {
+        const GpuCmd& c = cmds[ci];
+        if (!nativeRun.empty() && !(c.kind == GpuCmd::Kind::Tri && c.world && nativeActive)) flushNativeRun();
+        // widescreen: the polygons the game culled at the edge of its view go under everything else in the picture
+        if (nativeActive && !nativeScanned && c.kind == GpuCmd::Kind::Tri) {
+            nativeScanned = true;
+            for (size_t k = ci; k < cmds.size() && cmds[k].kind != GpuCmd::Kind::Flip; ++k) {
+                if (cmds[k].kind != GpuCmd::Kind::Tri || !cmds[k].world) continue;
+                drawNativeExtras(cmds[k].area, cmds[k].worldOff);
+                break;
+            }
+        }
         switch (c.kind) {
         case GpuCmd::Kind::Fill:
             want(-1, kFull);
             pushQuad(float(c.rx), float(c.ry), float(c.rx + c.rw), float(c.ry + c.rh), c.color);
             break;
-        case GpuCmd::Kind::Flip: break;
+        case GpuCmd::Kind::Flip: nativeScanned = false; break;
         case GpuCmd::Kind::Upload:
             if (!pool) break;
             flush();
@@ -485,8 +517,11 @@ void HiResRenderer::replay(const std::vector<GpuCmd>& cmds, const std::vector<st
             break;
         }
         case GpuCmd::Kind::Tri:
-            if (c.world && nativeActive) {   // the native renderer draws the scenery, all at once, where its first polygon was
-                if (!nativeDrawn) { nativeDrawn = true; drawNative(c.area); }
+            if (c.world && nativeActive) {   // scenery: the native renderer draws the level polygon that replaces this triangle, at this place in the order
+                if (c.nativePoly == cb2::NativeWorld::kNoPolygon) break;
+                if (!nativeRun.empty() && (std::memcmp(runArea, c.area, sizeof runArea) != 0 || runOff[0] != c.worldOff[0] || runOff[1] != c.worldOff[1])) flushNativeRun();
+                if (nativeRun.empty()) { std::memcpy(runArea, c.area, sizeof runArea); runOff[0] = c.worldOff[0]; runOff[1] = c.worldOff[1]; }
+                if (nativeRun.empty() || nativeRun.back() != c.nativePoly) nativeRun.push_back(c.nativePoly);
                 break;
             }
             // a flat black opaque triangle is a backdrop the game draws under the scenery: where the scenery has moved away it must not count as covering the pixel
@@ -501,6 +536,7 @@ void HiResRenderer::replay(const std::vector<GpuCmd>& cmds, const std::vector<st
             break;
         }
     }
+    flushNativeRun();
     flush();
     if (pool && std::getenv("CB2_GLDEBUG")) {
         int cnt[2][2][5] = {};

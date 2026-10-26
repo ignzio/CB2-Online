@@ -61,7 +61,10 @@ The level scenery is drawn from the level's .NSF file instead of from the game's
   depth (`H = 288`). The renderer does that in a vertex shader with a real depth buffer, so textures are perspective-correct. The camera position is read from the game's memory (0x80060768);
   the memory value is up to a few units off, so the exact one is found by searching for the position where the vertices the GTE projected land on vertices of the level (they lie on a grid of 16).
 - **Which polygons.** The game's own visibility culling is kept: the triangles it sent to the GPU are matched to the level's polygons through their corners, and exactly those are drawn natively
-  (the game's copies are skipped). Polygons the game draws see-through (water, ice, glass) are left to the game, as are all models, sprites and the HUD, drawn over the scenery in the game's order.
+  (the game's copies are skipped). Polygons the game draws see-through (water, ice, glass) are left to the game, as are all models, sprites and the HUD.
+- **Order, not depth.** The game's painter's algorithm lets a polygon that is nearer be covered by one that is farther (a mushroom overlapping a stone block is drawn over it even though the block is
+  in front in 3D). A depth buffer shows the geometry as it really is, which looks broken; so each scenery polygon is drawn natively *at the place of the game's triangle in the command list*, with
+  no depth test, and the game's other polygons (models, near pieces of subdivided polygons) come in between exactly as they do on the console. Only the extra widescreen polygons use a depth buffer, under the picture.
 - **Widescreen.** With widescreen on, the whole sections the visible polygons belong to are drawn, so the side margins show real geometry instead of the cut-off 4:3 view.
 - **60 fps and high refresh rates.** The in-between pictures draw the scenery from the camera position and matrix interpolated between the two frames, instead of morphing the game's polygons.
 - **Limits.** Texture animation (flowing water, flickering lights) is not played natively yet; the nearest section is chosen by what the game drew, so an area seen only through widescreen margins

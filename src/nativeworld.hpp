@@ -41,33 +41,42 @@ public:
     // were found (1.0 = all, 0 = no camera was found). A position can hold several vertices of the level (a hard edge has one per colour): polygons are matched by position.
     static constexpr uint64_t kNoVertex = ~0ull;
     float observe(const std::vector<std::array<int, 3>>& vertices, const float camGame[3], float camOut[3], std::vector<uint64_t>& ids);
-    // A triangle the game sent to the GPU, made of the level's vertices `ids`. True when the native renderer draws that polygon (in frame `frameId`) and the game's triangle
-    // is to be left out; false when the polygon is not in the level file or is drawn see-through (the game keeps it).
-    bool claim(const uint64_t keys[3], bool seeThrough, uint32_t frameId);
-    // After the claims of a pass: the polygons claimed in frame `frameId` or the one before are the ones to draw. With `extend` (a widened picture) the whole sections they
-    // belong to are drawn, so that the margins the game's 4:3 view culled are not empty. Needs the GL context.
+    // A triangle the game sent to the GPU, made of the level's vertices `keys`. Returns the level polygon that replaces it (the renderer draws that polygon where the game's
+    // triangle would have been, and leaves the game's out), or kNoPolygon when the polygon is not in the level file or is drawn see-through (the game keeps it). `passId` is
+    // different for every pass, `frameId` for every picture.
+    static constexpr uint32_t kNoPolygon = 0xFFFFFFFFu;
+    uint32_t claim(const uint64_t keys[3], bool seeThrough, uint32_t frameId, uint32_t passId);
+    // Call first for every triangle of a pass: polygons the game draws see-through are noted (before any claim, so that the answer does not depend on the order).
+    void markSeeThrough(const uint64_t keys[3], bool seeThrough, uint32_t frameId);
+    // After the claims of a pass. With `extend` (a widened picture) the polygons of the sections the game drew from that it did not draw are prepared, so that the margins the
+    // game's 4:3 view culled are not empty. Needs the GL context.
     void commit(uint32_t frameId, bool extend);
-    // Draws into the bound framebuffer, which has the layout of VRAM at `scale` times its size (so a pixel of the console's picture is `scale` pixels). The scissor and the
-    // depth buffer are the caller's: the depth buffer is cleared here.
-    void draw(const NativeView& view, int scale, float widen = 1.0f);
+    // Under the picture: the polygons the game did not draw (see commit), with a depth buffer of their own.
+    void drawExtras(const NativeView& view, float widen = 1.0f);
+    // The scenery polygons in the order the game drew them, with no depth test: the game's painter's algorithm lets a polygon that is nearer be covered by one that is farther.
+    void drawRun(const NativeView& view, const std::vector<uint32_t>& polygons, float widen = 1.0f);
 
 private:
     uint32_t levelId = 0xFFFFFFFFu;
-    GLuint program = 0, vao = 0, vbo = 0, ebo = 0, pageTex = 0;
+    GLuint program = 0, vao = 0, vbo = 0, ebo = 0, runEbo = 0, pageTex = 0;
     GLint locRot = -1, locCam = -1, locH = -1, locOfs = -1, locPages = -1, locDepth = -1, locWiden = -1, locMinZ = -1, locCull = -1;
     size_t triangleCount = 0;
     std::unordered_set<uint64_t> lookup;                   // the world positions (worldKey) of the level's vertices
     std::unordered_multimap<uint64_t, uint32_t> triples;   // three vertex numbers (sorted) of a polygon -> the polygon
+    std::vector<uint32_t> runIndex;
+    GLsizei extraCount = 0;
+    std::vector<uint32_t> polyPass;                        // the pass that last took the polygon
     std::vector<uint32_t> polyFirst, polyStamp;            // per polygon: its first triangle (a quad has two), the last frame it was claimed in
-    std::vector<uint8_t> polyTris, polySeeThrough;
+    std::vector<uint8_t> polyTris;
+    std::vector<uint32_t> polySeeThrough;                   // the last frame the game drew the polygon see-through in (0 = never)
     std::vector<uint32_t> polySection, polyClass;           // per polygon: its section, and its texture (polygons of a see-through texture are the game's to draw)
     std::unordered_set<uint32_t> seeThroughClasses;
     uint32_t sectionCount = 0;
-    GLsizei drawCount = 0;
     size_t statClaims = 0, statMiss = 0, statMulti = 0, statSemi = 0;   // debugging counters (CB2_NWLOG)
     int lastCam[3] = {0, 0, 0};
     bool haveCam = false;
     bool solveCamera(const std::vector<std::array<int, 3>>& v, const int guess[3], int radius, int cam[3]) const;
+    void setup(const NativeView& v, float widen, GLuint element);
     bool buildProgram();
 };
 

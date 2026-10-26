@@ -58,9 +58,12 @@ private:
     cb2::NativeWorld* nativeWorld = nullptr;
     cb2::NativeView viewMain, viewMid;
     const cb2::NativeView* viewNow = nullptr;
-    bool nativeActive = false, nativeDrawn = false;
+    bool nativeActive = false;
+    std::vector<uint32_t> nativeRun;                         // consecutive scenery polygons waiting to be drawn natively
+    int16_t runArea[4] = {0, 0, 0, 0}, runOff[2] = {0, 0};   // the draw area and draw offset of that run
     GLuint mainDepth = 0;
-    void drawNative(const int16_t* area);
+    void drawNativeExtras(const int16_t* area, const int16_t* offset);
+    void flushNativeRun();
     float gpuAreaLeft = 0, gpuAreaWidth = 320;   // the screen's area while its commands are replayed (for name tags)
     void widen(GpuCmd& c) const;
 

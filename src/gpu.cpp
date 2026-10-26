@@ -1,4 +1,6 @@
 #include "gpu.hpp"
+#include <cstdio>
+#include <cstdlib>
 
 #include <algorithm>
 #include <cmath>
@@ -64,7 +66,10 @@ void Gpu::recordTri(const Vtx& a, const Vtx& b, const Vtx& c, bool textured, boo
     }
 }
 
-size_t Gpu::tagWorld(const std::vector<WorldPoint>& points, const std::function<bool(const uint64_t*, bool)>& decide, std::array<int, 2>* offset) {
+size_t Gpu::tagWorld(const std::vector<WorldPoint>& points, const std::function<bool(const uint64_t*, GpuCmd&)>& decide, std::array<int, 2>* offset) {
+    static const bool dump = std::getenv("CB2_NWDUMP") != nullptr;
+    static int tagCalls = 0;
+    ++tagCalls;
     std::vector<std::unordered_map<uint64_t, uint64_t>> keys(drawOffsets.size());
     for (size_t i = 0; i < drawOffsets.size(); ++i)
         for (const auto& p : points) keys[i][alphaKey(p.x + float(drawOffsets[i][0]), p.y + float(drawOffsets[i][1]))] = p.id;
@@ -75,14 +80,23 @@ size_t Gpu::tagWorld(const std::vector<WorldPoint>& points, const std::function<
             const auto a = keys[i].find(alphaKey(c.x[0], c.y[0])), b = keys[i].find(alphaKey(c.x[1], c.y[1])), d = keys[i].find(alphaKey(c.x[2], c.y[2]));
             if (a == keys[i].end() || b == keys[i].end() || d == keys[i].end()) continue;
             const uint64_t ids[3] = {a->second, b->second, d->second};
-            if (!decide(ids, c.semi)) break;
+            const bool take = decide(ids, c);
+            if (dump && tagCalls == 40) std::printf("[nwdump] tagged tri %s center %.0f,%.0f w %.0f textured %d semi %d clut %d,%d\n", take ? "CLAIMED" : "refused", (c.x[0] + c.x[1] + c.x[2]) / 3, (c.y[0] + c.y[1] + c.y[2]) / 3, c.w[0], c.textured, c.semi, c.clutX, c.clutY);
+            if (!take) break;
             if (!n && offset) *offset = drawOffsets[i];
             c.world = true;
+            c.worldOff[0] = int16_t(drawOffsets[i][0]);
+            c.worldOff[1] = int16_t(drawOffsets[i][1]);
             ++n;
             break;
         }
     }
-    drawOffsets.clear();
+    {
+        if (dump && tagCalls == 40) {
+            for (const GpuCmd& c : cmds) if (c.kind == GpuCmd::Kind::Tri && !c.world) std::printf("[nwdump] game tri center %.0f,%.0f w %.0f textured %d semi %d\n", (c.x[0] + c.x[1] + c.x[2]) / 3, (c.y[0] + c.y[1] + c.y[2]) / 3, c.w[0], c.textured, c.semi);
+        }
+    }
+    if (offset) drawOffsets.clear();   // the last of a series of calls
     return n;
 }
 

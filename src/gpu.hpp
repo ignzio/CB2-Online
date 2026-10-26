@@ -25,6 +25,8 @@ struct GpuCmd {
     uint16_t clutX = 0, clutY = 0;
     uint8_t alpha = 255;                   // Tri: opacity the host renderer gives it (other players' Crashes, see markAlpha); 255 = the game's own look
     bool world = false;                    // Tri: part of the level scenery (see Gpu::tagWorld); a native world renderer draws these itself
+    int16_t worldOff[2] = {0, 0};          // Tri with `world`: the draw offset its corners were projected for
+    uint32_t nativePoly = 0xFFFFFFFFu;     // Tri with `world`: the level polygon the native renderer draws instead (its number in the level)
     int16_t area[4] = {};                  // draw area x0 y0 x1 y1 (inclusive)
     // Fill / Upload: VRAM rectangle. Upload carries the final pixels (offset into Gpu::cmdPool). Flip: the display area moved to rx, ry (size rw x rh) after vertical blank number "color".
     int16_t rx = 0, ry = 0, rw = 0, rh = 0;
@@ -64,9 +66,9 @@ public:
     std::unordered_set<uint64_t> alphaKeys;
     // A vertex the GTE projected: its screen position before the draw offset, and a number the caller gave it.
     struct WorldPoint { float x = 0, y = 0; uint64_t id = 0; };
-    // For every recorded triangle whose three corners are among `points`, asks `decide(ids of the corners, semi-transparent)`; when it answers true the triangle is marked as level
+    // For every recorded triangle whose three corners are among `points`, asks `decide(ids of the corners, the command)`; when it answers true the triangle is marked as level
     // scenery (GpuCmd::world). Returns how many were marked; `offset` receives the draw offset of the first one.
-    size_t tagWorld(const std::vector<WorldPoint>& points, const std::function<bool(const uint64_t*, bool)>& decide, std::array<int, 2>* offset = nullptr);
+    size_t tagWorld(const std::vector<WorldPoint>& points, const std::function<bool(const uint64_t*, GpuCmd&)>& decide, std::array<int, 2>* offset = nullptr);
     void flushTags() {
         alphaKeys.clear();
         if (pendingTags.empty()) return;

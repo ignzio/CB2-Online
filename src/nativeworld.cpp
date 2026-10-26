@@ -141,15 +141,17 @@ bool NativeWorld::buildProgram() {
 void NativeWorld::clear() {
     if (vbo) glDeleteBuffers(1, &vbo);
     if (ebo) glDeleteBuffers(1, &ebo);
+    if (runEbo) glDeleteBuffers(1, &runEbo);
     if (vao) glDeleteVertexArrays(1, &vao);
     if (pageTex) glDeleteTextures(1, &pageTex);
-    vbo = vao = ebo = pageTex = 0;
+    vbo = vao = ebo = runEbo = pageTex = 0;
     triangleCount = 0;
-    drawCount = 0;
+    extraCount = 0;
     lookup.clear();
     triples.clear();
     polyFirst.clear();
     polyStamp.clear();
+    polyPass.clear();
     polyTris.clear();
     polySeeThrough.clear();
     polySection.clear();
@@ -190,6 +192,11 @@ bool NativeWorld::load(const Bytes& nsfFile, uint32_t id) {
         if (!w || w->sky || w->vertices.empty()) continue;
         const size_t first = mesh.size();
         buildMesh(*w, atlas, 0, mesh, &source, &polygon);
+        if (std::getenv("CB2_NWLOG")) {
+            size_t emitted = 0;
+            for (size_t i = first; i < mesh.size(); i += 0) { const int n = polygon[i]; size_t e = i; while (e < mesh.size() && polygon[e] == n) ++e; ++emitted; i = e; }
+            std::printf("[nw] section %08x: %zu triangles + %zu quads in the file, %zu polygons built\n", w->eid, w->triangles.size(), w->quads.size(), emitted);
+        }
         if (mesh.size() == first) continue;
         // the polygons of this section: a triangle is three emitted vertices, a quad six
         for (size_t i = first; i < mesh.size();) {
@@ -229,12 +236,14 @@ bool NativeWorld::load(const Bytes& nsfFile, uint32_t id) {
     triangleCount = mesh.size() / 3;
     if (!triangleCount) return false;
     polyStamp.assign(polyFirst.size(), 0);
-    polySeeThrough.assign(polyFirst.size(), 0);
+    polyPass.assign(polyFirst.size(), 0);
+    polySeeThrough.assign(polyFirst.size(), 0u);
     haveCam = false;
 
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
     glGenBuffers(1, &ebo);
+    glGenBuffers(1, &runEbo);
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(mesh.size() * sizeof(GpuVertex)), mesh.data(), GL_STATIC_DRAW);
@@ -312,58 +321,49 @@ float NativeWorld::observe(const std::vector<std::array<int, 3>>& v, const float
     return float(hits) / float(v.size());
 }
 
-bool NativeWorld::claim(const uint64_t keys[3], bool seeThrough, uint32_t frameId) {
+void NativeWorld::markSeeThrough(const uint64_t keys[3], bool seeThrough, uint32_t frameId) {
+    if (!seeThrough) return;
+    const auto range = triples.equal_range(tripleKey(keys[0], keys[1], keys[2]));
+    for (auto it = range.first; it != range.second; ++it) { polySeeThrough[it->second] = frameId; seeThroughClasses.insert(polyClass[it->second]); }
+}
+
+uint32_t NativeWorld::claim(const uint64_t keys[3], bool seeThrough, uint32_t frameId, uint32_t passId) {
     const auto range = triples.equal_range(tripleKey(keys[0], keys[1], keys[2]));
     static const bool dbg = std::getenv("CB2_NWLOG") != nullptr;
     if (dbg) { ++statClaims; if (range.first == range.second) ++statMiss; else if (std::distance(range.first, range.second) > 1) ++statMulti; if (seeThrough) ++statSemi; }
-    if (range.first == range.second) return false;
-    for (auto it = range.first; it != range.second; ++it) if (seeThrough) { polySeeThrough[it->second] = 1; seeThroughClasses.insert(polyClass[it->second]); }
-    if (seeThrough) return false;
-    for (auto it = range.first; it != range.second; ++it) if (polySeeThrough[it->second]) return false;
+    if (range.first == range.second || seeThrough) return kNoPolygon;
+    for (auto it = range.first; it != range.second; ++it) if (polySeeThrough[it->second] && polySeeThrough[it->second] + 1 >= frameId) return kNoPolygon;
+    // polygons that share their three corners (a decal over a wall) are separate triangles for the game: each triangle takes the next one that has not been taken in this pass
+    uint32_t pick = range.first->second;
+    for (auto it = range.first; it != range.second; ++it) if (polyPass[it->second] != passId) { pick = it->second; break; }
     for (auto it = range.first; it != range.second; ++it) polyStamp[it->second] = frameId;
-    return true;
+    polyPass[pick] = passId;
+    return pick;
 }
 
 void NativeWorld::commit(uint32_t frameId, bool extend) {
-    if (!ready()) return;
-    // a polygon is drawn when the game drew it in this frame or the one before (the in-between pictures show both)
+    extraCount = 0;
+    if (!ready() || !extend) return;
+    // The polygons of the sections the game drew from that it did not draw itself (it culled them at the edge of its 4:3 view): drawn first, under the picture.
     std::vector<uint32_t> index;
-    index.reserve(triangleCount * 3 / 4);
     std::vector<uint8_t> sectionUsed(sectionCount, 0);
-    auto addPoly = [&](size_t p) {
+    auto drawnRecently = [&](size_t p) { const uint32_t s = polyStamp[p]; return s && s + 1 >= frameId && s <= frameId; };
+    for (size_t p = 0; p < polyFirst.size(); ++p) if (drawnRecently(p)) sectionUsed[polySection[p]] = 1;
+    for (size_t p = 0; p < polyFirst.size(); ++p) {
+        if (drawnRecently(p) || !sectionUsed[polySection[p]] || polySeeThrough[p] || seeThroughClasses.count(polyClass[p])) continue;
         for (uint32_t k = 0; k < polyTris[p]; ++k)
             for (uint32_t c = 0; c < 3; ++c) index.push_back((polyFirst[p] + k) * 3 + c);
-    };
-    for (size_t p = 0; p < polyFirst.size(); ++p) {
-        const uint32_t s = polyStamp[p];
-        if (!s || s + 1 < frameId || s > frameId || polySeeThrough[p]) continue;
-        sectionUsed[polySection[p]] = 1;
-        addPoly(p);
     }
-    if (extend) {
-        for (size_t p = 0; p < polyFirst.size(); ++p) {
-            const uint32_t s = polyStamp[p];
-            const bool claimed = s && s + 1 >= frameId && s <= frameId;
-            if (claimed || !sectionUsed[polySection[p]] || polySeeThrough[p] || seeThroughClasses.count(polyClass[p])) continue;
-            addPoly(p);
-        }
-    }
-    drawCount = GLsizei(index.size());
+    extraCount = GLsizei(index.size());
     static const bool dbg = std::getenv("CB2_NWLOG") != nullptr;
-    if (dbg) { std::printf("[nw] commit frame %u: %zu game triangles looked up (%zu not in the level, %zu with several polygons, %zu see-through), %zu triangles drawn\n", frameId, statClaims, statMiss, statMulti, statSemi, index.size() / 3); statClaims = statMiss = statMulti = statSemi = 0; }
+    if (dbg) { std::printf("[nw] commit frame %u: %zu game triangles looked up (%zu not in the level, %zu with several polygons, %zu see-through), %zu extra triangles\n", frameId, statClaims, statMiss, statMulti, statSemi, index.size() / 3); statClaims = statMiss = statMulti = statSemi = 0; }
     glBindVertexArray(vao);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(index.size() * sizeof(uint32_t)), index.data(), GL_DYNAMIC_DRAW);
     glBindVertexArray(0);
 }
 
-void NativeWorld::draw(const NativeView& v, int scale, float widen) {
-    if (!ready() || !v.valid || !drawCount) return;
-    (void)scale;   // the vertex shader works in console pixels; the viewport already is `scale` times as large
-    glClear(GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL);
-    glDepthMask(GL_TRUE);
+void NativeWorld::setup(const NativeView& v, float widen, GLuint element) {
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
     glUseProgram(program);
@@ -373,17 +373,43 @@ void NativeWorld::draw(const NativeView& v, int scale, float widen) {
     glUniform1f(locWiden, widen);
     glUniform2f(locOfs, v.ofx, v.ofy);
     glUniform1f(locDepth, kWorldScale);
-    static const float minZ = std::getenv("CB2_NWMINZ") ? float(std::atof(std::getenv("CB2_NWMINZ"))) : 200.0f;
+    static const float minZ = std::getenv("CB2_NWMINZ") ? float(std::atof(std::getenv("CB2_NWMINZ"))) : 24.0f;
     glUniform1f(locMinZ, minZ);
     glUniform1i(locCull, 0);
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, pageTex);
     glUniform1i(locPages, 3);
     glBindVertexArray(vao);
-    glDrawElements(GL_TRIANGLES, drawCount, GL_UNSIGNED_INT, nullptr);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element);
+}
+
+void NativeWorld::drawExtras(const NativeView& v, float widen) {
+    if (!ready() || !v.valid || !extraCount) return;
+    // the extra polygons are not in the game's order: they get a depth buffer among themselves
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_TRUE);
+    setup(v, widen, ebo);
+    glDrawElements(GL_TRIANGLES, extraCount, GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
     glActiveTexture(GL_TEXTURE0);
     glDisable(GL_DEPTH_TEST);
 }
 
-}  // namespace cb2
+void NativeWorld::drawRun(const NativeView& v, const std::vector<uint32_t>& polygons, float widen) {
+    if (!ready() || !v.valid || polygons.empty()) return;
+    // The scenery polygons in the order the game drew them (its painter's algorithm: no depth buffer, a nearer polygon can be drawn first and be covered by a farther one).
+    runIndex.clear();
+    for (const uint32_t p : polygons)
+        for (uint32_t k = 0; k < polyTris[p]; ++k)
+            for (uint32_t c = 0; c < 3; ++c) runIndex.push_back((polyFirst[p] + k) * 3 + c);
+    glDisable(GL_DEPTH_TEST);
+    setup(v, widen, runEbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(runIndex.size() * sizeof(uint32_t)), runIndex.data(), GL_STREAM_DRAW);
+    glDrawElements(GL_TRIANGLES, GLsizei(runIndex.size()), GL_UNSIGNED_INT, nullptr);
+    glBindVertexArray(0);
+    glActiveTexture(GL_TEXTURE0);
+}
+
+}  // namespace cb2

@@ -839,7 +839,8 @@ int main(int argc, char** argv) {
                     first = nullptr;
                 };
                 for (const auto& s : nwSamples) {
-                    if (s.pc != 0x80042420u && s.pc != 0x800426A0u && s.pc != 0x8004274Cu) continue;
+                    static const uint32_t pcMask = std::getenv("CB2_NWPC") ? uint32_t(std::strtoul(std::getenv("CB2_NWPC"), nullptr, 10)) : 7u;   // tool: which of the three scenery projections to use
+                    if (!(((pcMask & 1) && s.pc == 0x80042420u) || ((pcMask & 2) && s.pc == 0x800426A0u) || ((pcMask & 4) && s.pc == 0x8004274Cu))) continue;
                     if (first && std::memcmp(first->rt, s.rt, sizeof s.rt) != 0) flushRun();
                     if (!first) first = &s;
                     vs.push_back({s.vx, s.vy, s.vz});
@@ -854,10 +855,17 @@ int main(int argc, char** argv) {
                 std::vector<psx::Gpu::WorldPoint> all;
                 for (const auto& v : nwPoints) all.insert(all.end(), v.begin(), v.end());
                 std::array<int, 2> off = nwDrawOff;
-                if (p.gpu.tagWorld(all, [&](const uint64_t* ids, bool semi) { return nativeWorld.claim(ids, semi, frameId); }, &off)) nwDrawOff = off;
+                p.gpu.tagWorld(all, [&](const uint64_t* ids, psx::GpuCmd& c) { nativeWorld.markSeeThrough(ids, c.semi, frameId); return false; });
+                static uint32_t nwPass = 0;
+                ++nwPass;
+                if (p.gpu.tagWorld(all, [&](const uint64_t* ids, psx::GpuCmd& c) {
+                        const uint32_t poly = nativeWorld.claim(ids, c.semi, frameId, nwPass);
+                        c.nativePoly = poly;
+                        return poly != cb2::NativeWorld::kNoPolygon;
+                    }, &off)) nwDrawOff = off;
                 nativeWorld.commit(frameId, wideAspect > 1.4f);
-                nwNewest.ofx = nwOfs[0] + float(nwDrawOff[0]);
-                nwNewest.ofy = nwOfs[1] + float(nwDrawOff[1]);
+                nwNewest.ofx = nwOfs[0];
+                nwNewest.ofy = nwOfs[1];
             }
             if (p.gpu.flipCount != nwFlipSeen) { nwFlipSeen = p.gpu.flipCount; nwPrev = nwCur; nwCur = nwNewest; }
             nwSamples.clear();
