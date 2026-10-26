@@ -148,7 +148,7 @@ void Cpu::step() {
             else invalid(cur, ins);
             break;
         case 0x12:  // COP2 (GTE)
-            if (ins & 0x02000000u) gteCommand(ins & 0x1FFFFFFu);
+            if (ins & 0x02000000u) { gteInsnPc = cur; gteCommand(ins & 0x1FFFFFFu); }
             else if (rs == 0x00) L(rt, gteReadData(rd));
             else if (rs == 0x02) L(rt, gteReadCtrl(rd));
             else if (rs == 0x04) gteWriteData(rd, r[rt]);

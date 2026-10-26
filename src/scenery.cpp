@@ -146,13 +146,16 @@ bool resolveTexture(const Scenery& w, int texId, bool animated, int frame, const
 
 }  // namespace
 
-void buildMesh(const Scenery& w, const PageAtlas& atlas, int frame, std::vector<GpuVertex>& out) {
+void buildMesh(const Scenery& w, const PageAtlas& atlas, int frame, std::vector<GpuVertex>& out, std::vector<int>* source, std::vector<int>* polygon) {
     // Sky domes are positioned relative to the camera, so they ignore the world offset.
     const float ox = w.sky ? 0.0f : float(w.xOffset), oy = w.sky ? 0.0f : float(w.yOffset),
                 oz = w.sky ? 0.0f : float(w.zOffset);
     const int vcount = int(w.vertices.size());
 
+    int polyNumber = 0;
     auto emit = [&](int vi, const TexInfo* t, int corner) {
+        if (source) source->push_back(vi);
+        if (polygon) polygon->push_back(polyNumber);
         const SceneryVertex& v = w.vertices[vi];
         GpuVertex g{};
         g.pos[0] = (float(v.x) * 16.0f + ox) / kWorldScale;
@@ -180,6 +183,7 @@ void buildMesh(const Scenery& w, const PageAtlas& atlas, int frame, std::vector<
         const TexInfo* t;
         if (!resolveTexture(w, p.texture, p.animated, frame, t)) continue;
         emit(p.a, t, 1); emit(p.b, t, 0); emit(p.c, t, 2);
+        ++polyNumber;
     }
     for (const SceneryQuad& p : w.quads) {
         if (p.a >= vcount || p.b >= vcount || p.c >= vcount || p.d >= vcount) continue;
@@ -187,6 +191,7 @@ void buildMesh(const Scenery& w, const PageAtlas& atlas, int frame, std::vector<
         if (!resolveTexture(w, p.texture, p.animated, frame, t)) continue;
         emit(p.a, t, 1); emit(p.b, t, 0); emit(p.c, t, 2);
         emit(p.a, t, 1); emit(p.d, t, 3); emit(p.c, t, 2);
+        ++polyNumber;
     }
 }
 

@@ -26,6 +26,8 @@ public:
     uint32_t sectorCount() const { return total; }
     uint32_t fileLba(const std::string& path) const;         // 0 when not found
     std::string fileAt(uint32_t lba) const;                  // host path of the file covering this sector, or empty
+    // The whole content of a file ("S1\S000001E.NSF"), read through its own stream: safe to call while the game is reading the disc. False when it is not on the disc.
+    bool readFile(const std::string& path, std::vector<uint8_t>& out) const;
 
 private:
     struct Node {

@@ -52,6 +52,23 @@ second; `CB2_FAKEHZ=160` pretends to have such a monitor, `CB2_CONTINUOUS=1` for
   A true widescreen mode needs the engine's culling widened, which is a hack into the game code per level (not done).
 - **PGXP depth buffer** is not implemented: the game depends on painter's-algorithm order, and a depth buffer from the GTE depth would change what is drawn on top.
 
+## Native world (Esc -> Graphics, `native_world = on`, experimental)
+
+The level scenery is drawn from the level's .NSF file instead of from the game's projected polygons (`src/nativeworld.cpp`). It does not make the game faster (the GTE costs 0.2-0.4 ms of a
+3-4 ms frame); what it gives is quality and flexibility.
+
+- **How it works.** The game projects every scenery section with the camera matrix alone: a vertex is `16 * vertex + section offset - camera position`, rotated by the matrix and divided by its
+  depth (`H = 288`). The renderer does that in a vertex shader with a real depth buffer, so textures are perspective-correct. The camera position is read from the game's memory (0x80060768);
+  the memory value is up to a few units off, so the exact one is found by searching for the position where the vertices the GTE projected land on vertices of the level (they lie on a grid of 16).
+- **Which polygons.** The game's own visibility culling is kept: the triangles it sent to the GPU are matched to the level's polygons through their corners, and exactly those are drawn natively
+  (the game's copies are skipped). Polygons the game draws see-through (water, ice, glass) are left to the game, as are all models, sprites and the HUD, drawn over the scenery in the game's order.
+- **Widescreen.** With widescreen on, the whole sections the visible polygons belong to are drawn, so the side margins show real geometry instead of the cut-off 4:3 view.
+- **60 fps and high refresh rates.** The in-between pictures draw the scenery from the camera position and matrix interpolated between the two frames, instead of morphing the game's polygons.
+- **Limits.** Texture animation (flowing water, flickering lights) is not played natively yet; the nearest section is chosen by what the game drew, so an area seen only through widescreen margins
+  shows whole sections (some far parts the game would have culled); collision, entities and custom levels are not part of this stage.
+- **Tools.** `CB2_NWLOG=1` prints the camera search and how many of the game's triangles were found in the level; `CB2_SESSION=file` records the scenery projections of a play session
+  (`tools\record_session.ps1`), and `cb2_worldprobe` matches such data against level files.
+
 
 The pauses when the game changes zone or level are the game waiting for its disc. The emulated drive used to read at the console's real double speed
 (150 sectors a second) with a 12 ms spin-up per read, so a level load took 2.5 to 5 seconds, as on a real PlayStation. Now the emulated drive is faster

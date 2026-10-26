@@ -78,7 +78,8 @@ struct PageAtlas {
 PageAtlas buildPageAtlas(const Nsf& nsf);
 
 // Appends triangles for `world`. `frame` selects flipbook animation frames.
-void buildMesh(const Scenery& world, const PageAtlas& atlas, int frame, std::vector<GpuVertex>& out);
+// `source`, when given, receives for every emitted vertex the index of the scenery vertex it came from and `polygon` the number of the polygon (triangle or quad) it belongs to.
+void buildMesh(const Scenery& world, const PageAtlas& atlas, int frame, std::vector<GpuVertex>& out, std::vector<int>* source = nullptr, std::vector<int>* polygon = nullptr);
 
 constexpr float kWorldScale = 400.0f;  // game units per viewer unit
 

@@ -35,7 +35,7 @@ added, several `--mod` options stack. `--ram-mb 8|16` gives the engine heap more
 Settings can live in `cb2.cfg` (see `cb2.cfg.example`); command-line options override the file.
 
 Environment switches for diagnosing: `CB2_PERF`, `CB2_PCHIST`, `CB2_FRAMELOG` (speed, see [PERFORMANCE.md](PERFORMANCE.md)), `CB2_SMOOTHLOG` (60 fps smoothing),
-`CB2_RUNLOG` (level timer), `CB2_NOIDLESKIP`, `CB2_NOPRECISE`, `CB2_SOFTRASTER`, `CB2_NOINPUT` (scripted runs ignore the real keyboard and game pad; automatic with a capture or a hidden window), `CB2_FAKEHZ`/`CB2_CONTINUOUS` (high refresh rate test), `CB2_PERSPECTIVE`/`CB2_WIDESCREEN` (force the Graphics options), `CB2_DISCSPEED` (disc speed-up, overrides `disc_speed`), `CB2_WAV` (record the sound), `CB2_HWSUMMARY` (at exit: which CD and SPU features the game really used - XA, CD-DA, reverb, noise, pitch modulation).
+`CB2_RUNLOG` (level timer), `CB2_NOIDLESKIP`, `CB2_NOPRECISE`, `CB2_SOFTRASTER`, `CB2_NOINPUT` (scripted runs ignore the real keyboard and game pad; automatic with a capture or a hidden window), `CB2_FAKEHZ`/`CB2_CONTINUOUS` (high refresh rate test), `CB2_PERSPECTIVE`/`CB2_WIDESCREEN`/`CB2_NATIVEWORLD` (force the Graphics options), `CB2_NWLOG` (native world: camera search and matching statistics), `CB2_SESSION` (record the scenery projections of a play session), `CB2_GTEDUMP`/`CB2_GTEDUMPCSV`/`CB2_REGPC`/`CB2_REGLOG`/`CB2_FINDWORD`/`CB2_PEEK` (GTE and memory research tools), `CB2_DISCSPEED` (disc speed-up, overrides `disc_speed`), `CB2_WAV` (record the sound), `CB2_HWSUMMARY` (at exit: which CD and SPU features the game really used - XA, CD-DA, reverb, noise, pitch modulation).
 
 ## Other tools
 

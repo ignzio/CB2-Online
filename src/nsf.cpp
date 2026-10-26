@@ -121,8 +121,9 @@ std::vector<Entry> readEntryPage(const Bytes& page) {
     return entries;
 }
 
-std::vector<Bytes> loadPages(const std::string& path) {
-    const Bytes file = readFile(path);
+std::vector<Bytes> loadPages(const std::string& path) { return loadPagesFromBytes(readFile(path)); }
+
+std::vector<Bytes> loadPagesFromBytes(const Bytes& file) {
     std::vector<Bytes> pages;
     size_t off = 0;
     while (off < file.size()) {
@@ -145,9 +146,11 @@ std::vector<Bytes> loadPages(const std::string& path) {
     return pages;
 }
 
-Nsf loadNsf(const std::string& path) {
+Nsf loadNsf(const std::string& path) { return loadNsfFromBytes(readFile(path)); }
+
+Nsf loadNsfFromBytes(const Bytes& file) {
     Nsf nsf;
-    for (Bytes& page : loadPages(path)) {
+    for (Bytes& page : loadPagesFromBytes(file)) {
         ++nsf.chunkCount;
         const uint16_t family = rd16(page.data() + 2);
         if (family == 1) {

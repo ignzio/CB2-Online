@@ -18,6 +18,7 @@
 //   refresh_rate = 0                   your monitor's refresh rate for 60 fps smoothing (0 = ask the monitor). From about 90 Hz up, every refresh shows a picture
 //                                      interpolated for that exact moment (160 Hz monitors: 160 distinct pictures a second, no judder); the cost is one more frame of delay
 //   perspective = off                  perspective-correct texturing: textures stop swimming on floors and walls (uses the GTE depth, like DuckStation's PGXP)
+//   native_world = off                 draw the level scenery with OpenGL from the level files (true widescreen, camera-exact in-between pictures) instead of the game's own polygons; experimental
 //   widescreen = off                   show the picture at the window's aspect ratio (16:9 ...) instead of 4:3: 3D is squeezed and stretched back, the HUD keeps its shape
 //   vsync   = on                       wait for the monitor's refresh when showing a picture (no tearing)
 //   roster  = on                       the list of players at the right edge (F3 toggles it in game)
@@ -56,6 +57,7 @@ struct Config {
     bool reverb = true;        // SPU reverb in the mix
     int refreshRate = 0;       // 0 = the monitor's own
     bool perspective = false;  // perspective-correct texturing
+    bool nativeWorld = false;  // native world renderer
     bool widescreen = false;   // wide picture
     bool vsync = true;         // swap with the monitor's refresh
     bool update = true;        // look for a newer release (see updater.hpp); update = off disables it

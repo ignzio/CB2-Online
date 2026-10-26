@@ -57,6 +57,33 @@ void Gpu::recordTri(const Vtx& a, const Vtx& b, const Vtx& c, bool textured, boo
     g.area[0] = int16_t(areaX0); g.area[1] = int16_t(areaY0); g.area[2] = int16_t(areaX1); g.area[3] = int16_t(areaY1);
     if (alphaValue < 255 && !alphaKeys.empty() && !semiOn && alphaKeys.count(alphaKey(g.x[0], g.y[0])) && alphaKeys.count(alphaKey(g.x[1], g.y[1])) && alphaKeys.count(alphaKey(g.x[2], g.y[2]))) g.alpha = alphaValue;
     cmds.push_back(g);
+    if (drawOffsets.empty() || drawOffsets.back()[0] != offX || drawOffsets.back()[1] != offY) {
+        bool known = false;
+        for (const auto& o : drawOffsets) known = known || (o[0] == offX && o[1] == offY);
+        if (!known) drawOffsets.push_back({offX, offY});
+    }
+}
+
+size_t Gpu::tagWorld(const std::vector<WorldPoint>& points, const std::function<bool(const uint64_t*, bool)>& decide, std::array<int, 2>* offset) {
+    std::vector<std::unordered_map<uint64_t, uint64_t>> keys(drawOffsets.size());
+    for (size_t i = 0; i < drawOffsets.size(); ++i)
+        for (const auto& p : points) keys[i][alphaKey(p.x + float(drawOffsets[i][0]), p.y + float(drawOffsets[i][1]))] = p.id;
+    size_t n = 0;
+    for (GpuCmd& c : cmds) {
+        if (c.kind != GpuCmd::Kind::Tri) continue;
+        for (size_t i = 0; i < keys.size(); ++i) {
+            const auto a = keys[i].find(alphaKey(c.x[0], c.y[0])), b = keys[i].find(alphaKey(c.x[1], c.y[1])), d = keys[i].find(alphaKey(c.x[2], c.y[2]));
+            if (a == keys[i].end() || b == keys[i].end() || d == keys[i].end()) continue;
+            const uint64_t ids[3] = {a->second, b->second, d->second};
+            if (!decide(ids, c.semi)) break;
+            if (!n && offset) *offset = drawOffsets[i];
+            c.world = true;
+            ++n;
+            break;
+        }
+    }
+    drawOffsets.clear();
+    return n;
 }
 
 void Gpu::recordRect(int x, int y, int w, int h, int r, int g, int b, bool textured, bool semiOn, bool raw, int u0, int v0, int clutX, int clutY) {

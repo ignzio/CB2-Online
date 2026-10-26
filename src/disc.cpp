@@ -218,6 +218,21 @@ uint32_t VirtualDisc::fileLba(const std::string& path) const {
     return it == byPath.end() ? 0 : it->second;
 }
 
+bool VirtualDisc::readFile(const std::string& path, std::vector<uint8_t>& out) const {
+    const uint32_t lba = fileLba(upper(path.empty() || path[0] != '\\' ? "\\" + path : path));
+    if (!lba) return false;
+    for (const Node& n : nodes) {
+        if (n.dir || n.lba != lba) continue;
+        std::ifstream in(n.bundled ? bundlePath : n.host, std::ios::binary);
+        if (!in) return false;
+        in.seekg(std::streamoff(n.bundled ? n.offset : 0));
+        out.assign(n.size, 0);
+        in.read(reinterpret_cast<char*>(out.data()), std::streamsize(n.size));
+        return in.gcount() == std::streamsize(n.size);
+    }
+    return false;
+}
+
 int VirtualDisc::nodeForSector(uint32_t lba) const {
     if (extents.empty()) {
         for (size_t i = 0; i < nodes.size(); ++i)

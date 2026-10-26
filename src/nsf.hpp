@@ -35,6 +35,8 @@ constexpr uint32_t kEntryTypeScenery = 3;
 
 // Throws std::runtime_error on malformed input.
 Nsf loadNsf(const std::string& path);
+Nsf loadNsfFromBytes(const Bytes& file);
+std::vector<Bytes> loadPagesFromBytes(const Bytes& file);
 
 // Decodes every chunk of an NSF file into raw 64 KiB pages (compressed chunks are expanded).
 std::vector<Bytes> loadPages(const std::string& path);

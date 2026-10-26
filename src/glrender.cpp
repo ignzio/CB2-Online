@@ -304,8 +304,28 @@ void HiResRenderer::blit(const GpuCmd& c, const uint16_t* px) {
     glEnable(GL_SCISSOR_TEST);
 }
 
+void HiResRenderer::drawNative(const int16_t* area) {
+    flush();
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(area[0] * scaleFactor, area[1] * scaleFactor, (area[2] - area[0] + 1) * scaleFactor, (area[3] - area[1] + 1) * scaleFactor);
+    if (markCovered) glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    nativeWorld->draw(*viewNow, scaleFactor, wide);
+    glDisable(GL_BLEND);
+    cur = State{};
+    cur.blend = -2;   // the state the native pass left is unknown
+}
+
 void HiResRenderer::render(Gpu& gpu) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    viewNow = &viewMain;
+    nativeActive = nativeWorld && nativeWorld->ready() && viewMain.valid;
+    nativeDrawn = false;
+    if (nativeActive && !mainDepth) {
+        glGenRenderbuffers(1, &mainDepth);
+        glBindRenderbuffer(GL_RENDERBUFFER, mainDepth);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, textureWidth(), textureHeight());
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mainDepth);
+    }
     glViewport(0, 0, textureWidth(), textureHeight());
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
@@ -365,6 +385,9 @@ void HiResRenderer::renderMid(const std::vector<GpuCmd>& cmds, const std::vector
     glBindTexture(GL_TEXTURE_2D, vramTex);
     glEnable(GL_STENCIL_TEST);
     glStencilFunc(GL_ALWAYS, 1, 0xFF);
+    viewNow = &viewMid;
+    nativeActive = nativeWorld && nativeWorld->ready() && viewMid.valid;
+    nativeDrawn = false;
     markCovered = true;
     replay(cmds, texts, nullptr);
     markCovered = false;
@@ -462,6 +485,10 @@ void HiResRenderer::replay(const std::vector<GpuCmd>& cmds, const std::vector<st
             break;
         }
         case GpuCmd::Kind::Tri:
+            if (c.world && nativeActive) {   // the native renderer draws the scenery, all at once, where its first polygon was
+                if (!nativeDrawn) { nativeDrawn = true; drawNative(c.area); }
+                break;
+            }
             // a flat black opaque triangle is a backdrop the game draws under the scenery: where the scenery has moved away it must not count as covering the pixel
             if (markCovered && !c.textured && !c.semi && c.col[0][0] < 6 && c.col[0][1] < 6 && c.col[0][2] < 6 && c.col[1][0] < 6 && c.col[2][0] < 6) { want(-4, c.area); pushTri(c, 0); break; }
             if (c.semi && c.textured) {

@@ -61,12 +61,13 @@ std::vector<PauseMenu::Item> PauseMenu::items() const {
         if (ctx.online) v.push_back(kOnline);
         v.push_back(kRecords);
         v.push_back(kControls);
+        v.push_back(kReport);
         v.push_back(kMainMenu);
         v.push_back(kQuit);
         return v;
     }
     case Page::Sound: return {kVolume, kFilter, kFullscreen, kTimer, kBack};
-    case Page::Graphics: return {kTextures, kPerspective, kWide, kSmooth, kVsync, kBack};
+    case Page::Graphics: return {kTextures, kPerspective, kNative, kWide, kSmooth, kVsync, kBack};
     case Page::Online: return {kTags, kOpacity, kRoster, kBack};
     default: return {};
     }
@@ -91,6 +92,7 @@ void PauseMenu::adjust(Item item, int d) {
     case kTimer: s->timer = !s->timer; changed = true; break;
     case kTextures: s->textures = 1 - s->textures; changed = true; break;
     case kPerspective: s->perspective = !s->perspective; changed = true; break;
+    case kNative: s->nativeWorld = !s->nativeWorld; changed = true; break;
     case kWide: s->widescreen = !s->widescreen; changed = true; break;
     case kSmooth: s->smooth = !s->smooth; changed = true; break;
     case kVsync: s->vsync = !s->vsync; changed = true; break;
@@ -115,10 +117,11 @@ void PauseMenu::activate(Item item) {
     case kOnline: setPage(Page::Online); break;
     case kRecords: setPage(Page::Records); recordTop = 0; break;
     case kControls: setPage(Page::Controls); controlsSel = 0; column = 0; break;
+    case kReport: result = Result::ReportBug; break;
     case kMainMenu: mainSel = sel; page = Page::ConfirmMenu; confirmSel = 1; break;
     case kQuit: mainSel = sel; page = Page::ConfirmQuit; confirmSel = 1; break;
     case kBack: setPage(Page::Main); break;
-    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: case kTextures: case kPerspective: case kWide: adjust(item, 1); break;
+    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: case kTextures: case kPerspective: case kNative: case kWide: adjust(item, 1); break;
     default: break;
     }
 }
@@ -315,8 +318,9 @@ void PauseMenu::draw(double t) {
         sel = std::min(sel, int(list.size()) - 1);
         barX = 262; barW = 144;
         const bool tight = list.size() > 7;   // eight rows must still clear the hint line at the bottom
-        const float step = tight ? 41.0f : 44.0f;
-        float y = tight ? 98.0f : 112.0f;
+        const bool tighter = list.size() > 8;
+        const float step = tighter ? 37.0f : tight ? 41.0f : 44.0f;
+        float y = tighter ? 92.0f : tight ? 98.0f : 112.0f;
         for (size_t i = 0; i < list.size(); ++i, y += step) {
             const bool on = int(i) == sel;
             const int idx = int(i);
@@ -327,6 +331,7 @@ void PauseMenu::draw(double t) {
             case kOnline: centredRow(idx, y, on, "ONLINE"); break;
             case kRecords: centredRow(idx, y, on, "RECORDS"); break;
             case kControls: centredRow(idx, y, on, "CONTROLS"); break;
+            case kReport: centredRow(idx, y, on, "REPORT A BUG"); break;
             case kMainMenu: centredRow(idx, y, on, "MAIN MENU"); break;
             case kQuit: centredRow(idx, y, on, "QUIT GAME"); break;
             case kBack: centredRow(idx, y, on, "BACK"); break;
@@ -347,6 +352,7 @@ void PauseMenu::draw(double t) {
             case kTimer: valueRow(idx, y, on, "LEVEL TIMER", s->timer ? "ON" : "OFF", kTeal); break;
             case kWide: valueRow(idx, y, on, "WIDESCREEN", s->widescreen ? "ON" : "OFF", kTeal); break;
             case kPerspective: valueRow(idx, y, on, "PERSPECTIVE", s->perspective ? "ON" : "OFF", kTeal); break;
+            case kNative: valueRow(idx, y, on, "NATIVE WORLD", s->nativeWorld ? "ON" : "OFF", kTeal); break;
             case kTextures: valueRow(idx, y, on, "TEXTURES", s->textures ? "SMOOTH" : "SHARP", kTeal); break;
             case kSmooth: valueRow(idx, y, on, "60 FPS SMOOTHING", s->smooth ? "ON" : "OFF", kTeal); break;
             case kVsync: valueRow(idx, y, on, "VSYNC", s->vsync ? "ON" : "OFF", kTeal); break;

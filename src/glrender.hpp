@@ -9,6 +9,7 @@
 #include <glad/gl.h>
 
 #include "gpu.hpp"
+#include "nativeworld.hpp"
 
 namespace psx {
 
@@ -25,6 +26,10 @@ public:
     // stretch of the display puts them back to their true shape; 2D polygons (HUD, sprites) are squeezed too, but pinned towards the nearest edge so they keep their shape and their place.
     // Whatever the game culled at the edge of its 4:3 view is not there to be shown: wide pictures can have empty or missing margins. 1 = off.
     void setWidescreen(float factor) { wide = factor; }
+    // Native world: the level scenery (commands tagged GpuCmd::world) is not replayed; `world` draws it from the level file with the camera in `viewMain` (for render) or `viewMid` (for
+    // renderMid) at the place in the command list where the first scenery polygon was. Null or not ready: the game's own polygons are drawn.
+    void setNativeWorld(cb2::NativeWorld* world) { nativeWorld = world; }
+    void setNativeViews(const cb2::NativeView& main, const cb2::NativeView& mid) { viewMain = main; viewMid = mid; }
     // Replays and clears gpu.cmds / gpu.cmdPool.
     void render(Gpu& gpu);
     // An in-between picture drawn from the given commands (without VRAM uploads) into a second target of the same layout; midTexture() holds it.
@@ -50,6 +55,12 @@ private:
     GLuint midStencil = 0;
     bool perspective = false;
     float wide = 1.0f;
+    cb2::NativeWorld* nativeWorld = nullptr;
+    cb2::NativeView viewMain, viewMid;
+    const cb2::NativeView* viewNow = nullptr;
+    bool nativeActive = false, nativeDrawn = false;
+    GLuint mainDepth = 0;
+    void drawNative(const int16_t* area);
     float gpuAreaLeft = 0, gpuAreaWidth = 320;   // the screen's area while its commands are replayed (for name tags)
     void widen(GpuCmd& c) const;
 

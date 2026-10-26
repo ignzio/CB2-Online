@@ -1,7 +1,7 @@
 #pragma once
 // The in-game menu (Esc). It is drawn over the frozen game picture with the same look as the online lobby (ui.hpp); the game is paused while it
 // is open and the caller saves the settings when changed() says so.
-//   Main              Resume / Sound and picture / Online (online play only) / Controls / Main menu / Quit
+//   Main              Resume / Sound and picture / Graphics / Online (online play only) / Records / Controls / Report a bug / Main menu / Quit
 //   Sound and picture volume slider, display filter, fullscreen
 //   Online            name tags, how solid the other players are (slider), the player list at the right edge
 //   Controls          keyboard and game pad bindings side by side; Enter binds the column under the cursor, a game pad button or key is then pressed
@@ -29,12 +29,13 @@ struct Settings {
     bool smooth = false;     // 60 fps: an in-between picture every other vertical blank
     int textures = 0;        // 0 sharp, 1 smooth (bilinear texture filtering)
     bool perspective = false; // perspective-correct texturing
+    bool nativeWorld = false; // draw the level scenery natively from the level files instead of the game's own polygons (experimental)
     bool widescreen = false;  // show the picture at the window's aspect ratio instead of 4:3
     bool vsync = true;       // wait for the monitor's refresh when showing a picture
     cb2input::Keys keys;     // keyboard and game pad bindings
 };
 
-enum class Result { None, MainMenu, Quit };
+enum class Result { None, MainMenu, Quit, ReportBug };
 
 // One line of the Records page.
 struct RecordRow { std::string level, best, detail; };
@@ -76,7 +77,7 @@ public:
 
 private:
     enum class Page { Closed, Main, Sound, Graphics, Online, Records, Controls, Capture, ConfirmMenu, ConfirmQuit };
-    enum Item { kResume, kSound, kGraphics, kPerspective, kWide, kOnline, kRecords, kControls, kMainMenu, kQuit, kVolume, kFilter, kFullscreen, kTimer, kSmooth, kVsync, kTextures, kTags, kOpacity, kRoster, kBack };
+    enum Item { kResume, kSound, kGraphics, kPerspective, kNative, kWide, kOnline, kRecords, kControls, kReport, kMainMenu, kQuit, kVolume, kFilter, kFullscreen, kTimer, kSmooth, kVsync, kTextures, kTags, kOpacity, kRoster, kBack };
     struct Hit { float x, y, w, h; int index; };
 
     cb2ui::Canvas canvas;

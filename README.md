@@ -36,10 +36,15 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 - **OpenGL renderer** at up to 8x the original resolution (default 4x) with unrounded vertex positions, so the geometry does not wobble.
 - **60 fps smoothing** (optional): the game draws 30 pictures per second; this draws the pictures in between.
 - **Smooth textures** (optional): bilinear filtering instead of the blocky texels. **Perspective-correct textures** (optional): no more swimming textures on floors and walls.
+- **Native world** (optional, experimental): the level scenery is drawn by OpenGL straight from the level files, with a depth buffer and perspective-correct textures, instead of from the polygons the console's code projected. It is what makes widescreen show real geometry in the side margins, and it moves the camera exactly for the 60 fps pictures in between. Water and other see-through polygons stay the game's own.
 - **Widescreen** (optional): the picture at your window's aspect ratio (see the limits below).
 - **High refresh rates:** with 60 fps smoothing on a 90+ Hz monitor every refresh shows its own picture (160 Hz = 160 distinct pictures a second).
 - Display filters (nearest / bilinear / sharp bilinear), fullscreen, vsync, 4:3 picture whatever the window shape.
 - Volume slider; the original sound and music.
+
+**Bug reports**
+- Esc → **Report a bug** opens a GitHub issue in your browser with your version, system, graphics card, settings and the last crash filled in. Nothing is sent until you press Submit.
+- If the game crashes it writes `crash.log` next to the game (what failed, where, the game's state). If it vanishes without an error (killed, graphics driver reset) the next start notices that too. Either way, the next start offers to open the bug report for you; the log is kept as `crash-last.log`.
 
 **Controls**
 - Keyboard, game pad (XInput / SDL mapping) and mouse; every PS1 button is **rebindable** for both keyboard and pad, side by side in the menu.
@@ -119,7 +124,7 @@ Left-Right or dragging to move a slider, `Esc` / B / right click to go back.
 | Page | What is on it |
 | --- | --- |
 | **Sound and picture** | volume, display filter, fullscreen, level timer |
-| **Graphics** | **textures** (sharp / smooth), **perspective** correction, **widescreen**, **60 fps smoothing**, vsync |
+| **Graphics** | **textures** (sharp / smooth), **perspective** correction, **native world**, **widescreen**, **60 fps smoothing**, vsync |
 | **Online** | name tags, **opacity of the other players**, the player list |
 | **Records** | your best time and runs per level |
 | **Controls** | keyboard and game pad bindings side by side; `Enter` rebinds, `Del` clears, a key already in use swaps |
@@ -160,7 +165,7 @@ Everything in the menu is remembered in `cb2.cfg` next to `Crash2.exe`; the file
 | `name`, `room` | your name above your Crash; the room you meet people in |
 | `scale` | internal resolution multiplier (1-8) |
 | `volume`, `filter`, `timer` | the *Sound and picture* page |
-| `textures`, `perspective`, `widescreen`, `smooth`, `vsync`, `refresh_rate` | the *Graphics* page (`refresh_rate = 0` uses your monitor's rate) |
+| `textures`, `perspective`, `native_world`, `widescreen`, `smooth`, `vsync`, `refresh_rate` | the *Graphics* page (`refresh_rate = 0` uses your monitor's rate) |
 | `disc_speed` | how many times faster than the console's drive the game's disc reads are (1-24, default 16) |
 | `nametags`, `opacity`, `roster` | the *Online* page |
 | `key_<button>`, `pad_<button>` | bindings |

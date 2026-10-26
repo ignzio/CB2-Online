@@ -18,6 +18,9 @@
 
 #include "audio.hpp"
 #include "bundle.hpp"
+#include "crashreport.hpp"
+#include <array>
+#include <map>
 #include "config.hpp"
 #include "glrender.hpp"
 #include "lobby.hpp"
@@ -132,6 +135,7 @@ int main(int argc, char** argv) {
     const bool bundled = bundle.openSelf();
     const std::string exeDir = psx::selfPath().empty() ? std::filesystem::path(argv[0]).parent_path().string()
                                                        : std::filesystem::path(psx::selfPath()).parent_path().string();
+    cb2crash::install(exeDir, CB2_VERSION);
     cfg.load(exeDir);
     int first = 1;
     std::string loadStatePath, saveStatePath;   // --load-state file, --save-state-at FRAME:file
@@ -343,6 +347,19 @@ int main(int argc, char** argv) {
     glfwMakeContextCurrent(win);
     glfwSwapInterval(0);
     if (!gladLoadGL(glfwGetProcAddress)) return 1;
+    // Crash reports: what the graphics driver is, and (for a player's session, not a test) whether the last session failed and the lock file that shows the next one if this one vanishes.
+    std::snprintf(cb2crash::live.renderer, sizeof cb2crash::live.renderer, "%s / %s", reinterpret_cast<const char*>(glGetString(GL_RENDERER)), reinterpret_cast<const char*>(glGetString(GL_VERSION)));
+    const bool interactiveSession = !hidden && captureFrame == 0 && menuScript.empty();
+    struct SessionGuard { bool on; ~SessionGuard() { if (on) cb2crash::sessionEnd(); } } sessionGuard{interactiveSession};
+    if (interactiveSession) {
+        std::string lastFailure;
+        if (cb2crash::previousSessionFailed(lastFailure) &&
+            cb2crash::ask("Crash Bandicoot 2", "The game closed unexpectedly last time.\n\nOpen a bug report in your browser? The page opens with the details filled in; nothing is sent until you press Submit.")) {
+            std::snprintf(cb2crash::live.phase, sizeof cb2crash::live.phase, "reporting");
+            cb2crash::openIssue(CB2_UPDATE_REPO, "The game closed unexpectedly", cb2crash::reportText(lastFailure));
+        }
+        cb2crash::sessionStart();
+    }
 
     const GLuint prog = glCreateProgram();
     glAttachShader(prog, compile(GL_VERTEX_SHADER, kVert));
@@ -397,6 +414,7 @@ int main(int argc, char** argv) {
         cb2update::Updater updater;
         const bool checkUpdates = cfg.update && !std::string(CB2_UPDATE_REPO).empty();
         if (checkUpdates) updater.startCheck(CB2_UPDATE_REPO, version);
+        cb2crash::setPhase("lobby");
         const cb2lobby::Outcome outcome = cb2lobby::run(win, mp, online, lobbyScript, checkUpdates ? &updater : nullptr, version);
         if (outcome == cb2lobby::Outcome::Quit) { glfwTerminate(); return 0; }
         if (outcome == cb2lobby::Outcome::Update) {
@@ -412,6 +430,7 @@ int main(int argc, char** argv) {
         }
         if (outcome == cb2lobby::Outcome::Online) {
             onlineStarted = true;
+            std::snprintf(cb2crash::live.room, sizeof cb2crash::live.room, "%s", online.room.c_str());
             mp.install();
             cfg.remember(exeDir, "name", online.name);
             cfg.remember(exeDir, "room", online.room);
@@ -448,6 +467,7 @@ int main(int argc, char** argv) {
     settings.textures = cfg.textures;
     settings.widescreen = cfg.widescreen || std::getenv("CB2_WIDESCREEN") != nullptr;
     settings.perspective = cfg.perspective || std::getenv("CB2_PERSPECTIVE") != nullptr;
+    settings.nativeWorld = cfg.nativeWorld || std::getenv("CB2_NATIVEWORLD") != nullptr;
     settings.vsync = cfg.vsync;
     psx::FrameInterpolator interp;
     if (const char* g = std::getenv("CB2_GROW")) interp.grow = float(std::atof(g));   // tests
@@ -530,6 +550,7 @@ int main(int argc, char** argv) {
         cfg.remember(exeDir, "timer", settings.timer ? "on" : "off");
         cfg.remember(exeDir, "widescreen", settings.widescreen ? "on" : "off");
         cfg.remember(exeDir, "perspective", settings.perspective ? "on" : "off");
+        cfg.remember(exeDir, "native_world", settings.nativeWorld ? "on" : "off");
         cfg.remember(exeDir, "textures", settings.textures ? "smooth" : "sharp");
         cfg.remember(exeDir, "smooth", settings.smooth ? "on" : "off");
         cfg.remember(exeDir, "vsync", settings.vsync ? "on" : "off");
@@ -549,6 +570,26 @@ int main(int argc, char** argv) {
         return pad;
     };
     double t0 = glfwGetTime();
+    // Native world renderer (Graphics > NATIVE WORLD): the level's scenery is drawn from its file; the GTE results tell it where the camera is and which polygons it replaces.
+    cb2::NativeWorld nativeWorld;
+    std::vector<r3000::GteSample> nwSamples;
+    uint32_t nwTried = 0xFFFFFFFFu;
+    cb2::NativeView nwNewest, nwCur, nwPrev;   // the camera of the frame being drawn, of the last frame shown and of the one before it
+    std::vector<std::vector<psx::Gpu::WorldPoint>> nwPoints;
+    std::array<int, 2> nwDrawOff{0, 0};
+    float nwOfs[2] = {256, 120};
+    uint64_t nwFlipSeen = 0;
+    bool nativeWanted = false;
+    auto lerpView = [](const cb2::NativeView& a, const cb2::NativeView& b, float t) {
+        cb2::NativeView r = a;
+        float jump = 0;
+        for (int k = 0; k < 3; ++k) jump = std::max(jump, std::abs(a.cam[k] - b.cam[k]));
+        r.valid = a.valid && b.valid && jump < 4000.0f;   // a teleport or a new area: no camera in between
+        for (int k = 0; k < 3; ++k) r.cam[k] = a.cam[k] + (b.cam[k] - a.cam[k]) * t;
+        for (int k = 0; k < 9; ++k) r.rot[k] = a.rot[k] + (b.rot[k] - a.rot[k]) * t;
+        r.h = a.h + (b.h - a.h) * t;
+        return r;
+    };
     uint64_t base = p.frames;
     bool quitRequested = false;
     // CB2_FRAMELOG=1: report every pass of the main loop that took more than 60 ms of wall time, with what the online code spent in it.
@@ -623,6 +664,22 @@ int main(int argc, char** argv) {
         }
     }
     while (!glfwWindowShouldClose(win) && !quitRequested) {
+        {   // what a crash report should say about the game's state
+            static double lastLive = 0;
+            cb2crash::live.frame = p.frames;
+            cb2crash::live.level = p.peek32(0x8005F3ECu) & 0xFFu;
+            cb2crash::live.guestPc = p.cpu.pc;
+            cb2crash::setPhase(menu.isOpen() ? "menu" : "playing");
+            static const uint64_t testCrash = std::getenv("CB2_TESTCRASH") ? std::strtoull(std::getenv("CB2_TESTCRASH"), nullptr, 10) : 0;   // tool: crash on purpose at this frame (tries the crash report)
+            if (testCrash && p.frames >= testCrash) *static_cast<volatile int*>(nullptr) = 1;
+            const double nowLive = glfwGetTime();
+            if (nowLive - lastLive > 1.0) {
+                lastLive = nowLive;
+                std::snprintf(cb2crash::live.settings, sizeof cb2crash::live.settings, "scale %d, smooth %d, widescreen %d, perspective %d, native world %d, textures %d, vsync %d, filter %d, native code %d", hiresScale, settings.smooth, settings.widescreen,
+                              settings.perspective, settings.nativeWorld, settings.textures, settings.vsync, settings.filter, int(p.nativeEnabled()));
+                cb2crash::heartbeat();
+            }
+        }
         if (frameLog) {
             const auto nowT = std::chrono::steady_clock::now();
             const double ms = std::chrono::duration<double, std::milli>(nowT - loopStart).count();
@@ -713,6 +770,18 @@ int main(int argc, char** argv) {
             continue;
         }
         if (due > 8.0 || fast) { t0 = glfwGetTime(); base = p.frames; }
+        // CB2_SESSION=file: a play session recorder. Every game frame appends one line: the frame, the level, the camera position the game keeps at 0x80060768 and, for every group of vertices the
+        // GTE projected with one transform (a model, or the level scenery), the instruction, the vertex count, the matrix, the translation and the bounds of the input vertices. Play normally;
+        // cb2_worldprobe (and later the native renderer) matches these lines against the level files.
+        static FILE* sessFile = [] { const char* f = std::getenv("CB2_SESSION"); return f ? std::fopen(f, "w") : nullptr; }();
+        static std::vector<r3000::GteSample> sessSamples;
+        if (sessFile && !p.cpu.gteSamples) { sessSamples.clear(); p.cpu.gteSamples = &sessSamples; }
+        static const uint64_t gteDump = std::getenv("CB2_GTEDUMP") ? std::strtoull(std::getenv("CB2_GTEDUMP"), nullptr, 10) : 0;
+        nativeWanted = settings.nativeWorld && useHires && !p.nativeEnabled();
+        if (nativeWanted && !p.cpu.gteSamples2) { nwSamples.clear(); p.cpu.gteSamples2 = &nwSamples; }
+        else if (!nativeWanted) { p.cpu.gteSamples2 = nullptr; hires.setNativeWorld(nullptr); }
+        static std::vector<r3000::GteSample> dumpSamples;
+        if (gteDump && p.frames + 1 >= gteDump && p.frames <= gteDump && !p.cpu.gteSamples) { if (const char* dp = std::getenv("CB2_REGPC")) { p.cpu.dbgPc = uint32_t(std::strtoul(dp, nullptr, 16)); p.cpu.dbgHits = 0; } dumpSamples.clear(); p.cpu.gteSamples = &dumpSamples; }
         const auto runBegan = std::chrono::steady_clock::now();
         for (int step = 0; step < std::min(int(due), 4) && err.empty(); ++step) {
             frameReady = false;
@@ -726,6 +795,137 @@ int main(int argc, char** argv) {
             }
         }
         msRun += since(runBegan);
+        if (p.cpu.gteSamples2 == &nwSamples) {
+            const uint32_t lvl = p.peek32(0x8005F3ECu) & 0xFFu;
+            if (lvl != nwTried) {
+                nwTried = lvl;
+                std::vector<uint8_t> file;
+                char name[40];
+                std::snprintf(name, sizeof name, "S%u\\S%07X.NSF", lvl >> 4, lvl);
+                if (!(p.disc.readFile(name, file) && nativeWorld.load(file, lvl))) nativeWorld.clear();
+                nwNewest = nwCur = nwPrev = cb2::NativeView{};
+                nwPoints.clear();
+            }
+            const uint32_t frameId = uint32_t(p.gpu.flipCount) + 1;
+            std::vector<psx::Gpu::WorldPoint> pts;
+            if (nativeWorld.ready()) {
+                // the samples of the level's projections, in runs of one camera matrix (a pass can hold the end of one frame and the start of the next)
+                static const bool nwLog = std::getenv("CB2_NWLOG") != nullptr;
+                float camGame[3];
+                for (int k = 0; k < 3; ++k) camGame[k] = float(int32_t(p.peek32(0x80060768u + 4u * uint32_t(k))));
+                std::vector<std::array<int, 3>> vs;
+                std::vector<std::array<float, 2>> runPts;
+                const r3000::GteSample* first = nullptr;
+                auto flushRun = [&] {
+                    if (!first) return;
+                    float cam[3];
+                    std::vector<uint64_t> ids;
+                    const float explained = nativeWorld.observe(vs, camGame, cam, ids);
+                    for (size_t i = 0; i < ids.size(); ++i) if (ids[i] != cb2::NativeWorld::kNoVertex) pts.push_back({runPts[i][0], runPts[i][1], ids[i]});
+                    if (nwLog) std::printf("[nw] frame %llu: %zu scenery vertices, %.1f%% found in the level; camera %.0f %.0f %.0f (game %.0f %.0f %.0f)\n", (unsigned long long)p.frames, vs.size(), explained * 100.0f, cam[0], cam[1], cam[2], camGame[0], camGame[1], camGame[2]);
+                    if (explained > 0.5f) {
+                        const uint32_t* rt = first->rt;
+                        const float m[9] = {float(int16_t(rt[0])), float(int16_t(rt[0] >> 16)), float(int16_t(rt[1])), float(int16_t(rt[1] >> 16)), float(int16_t(rt[2])), float(int16_t(rt[2] >> 16)),
+                                            float(int16_t(rt[3])), float(int16_t(rt[3] >> 16)), float(int16_t(rt[4]))};
+                        std::copy(m, m + 9, nwNewest.rot);
+                        std::copy(cam, cam + 3, nwNewest.cam);
+                        nwNewest.h = float(first->h);
+                        nwOfs[0] = float(first->ofx >> 16);
+                        nwOfs[1] = float(first->ofy >> 16);
+                        nwNewest.valid = true;
+                    }
+                    vs.clear();
+                    runPts.clear();
+                    first = nullptr;
+                };
+                for (const auto& s : nwSamples) {
+                    if (s.pc != 0x80042420u && s.pc != 0x800426A0u && s.pc != 0x8004274Cu) continue;
+                    if (first && std::memcmp(first->rt, s.rt, sizeof s.rt) != 0) flushRun();
+                    if (!first) first = &s;
+                    vs.push_back({s.vx, s.vy, s.vz});
+                    runPts.push_back({s.sx, s.sy});
+                }
+                flushRun();
+            }
+            // the polygons the game draws for the scenery are the ones whose corners the GTE projected in the last few passes
+            nwPoints.push_back(std::move(pts));
+            if (nwPoints.size() > 3) nwPoints.erase(nwPoints.begin());
+            if (nwNewest.valid) {
+                std::vector<psx::Gpu::WorldPoint> all;
+                for (const auto& v : nwPoints) all.insert(all.end(), v.begin(), v.end());
+                std::array<int, 2> off = nwDrawOff;
+                if (p.gpu.tagWorld(all, [&](const uint64_t* ids, bool semi) { return nativeWorld.claim(ids, semi, frameId); }, &off)) nwDrawOff = off;
+                nativeWorld.commit(frameId, wideAspect > 1.4f);
+                nwNewest.ofx = nwOfs[0] + float(nwDrawOff[0]);
+                nwNewest.ofy = nwOfs[1] + float(nwDrawOff[1]);
+            }
+            if (p.gpu.flipCount != nwFlipSeen) { nwFlipSeen = p.gpu.flipCount; nwPrev = nwCur; nwCur = nwNewest; }
+            nwSamples.clear();
+        }
+        if (sessFile && p.cpu.gteSamples == &sessSamples) {
+            p.cpu.gteSamples = nullptr;
+            std::fprintf(sessFile, "F %llu L %u C %d %d %d\n", (unsigned long long)p.frames, p.peek32(0x8005F3ECu) & 0xFFu, int(p.peek32(0x80060768u)), int(p.peek32(0x8006076Cu)), int(p.peek32(0x80060770u)));
+            size_t s0 = 0;
+            for (size_t n = 1; n <= sessSamples.size(); ++n) {
+                const auto& a = sessSamples[s0];
+                if (n < sessSamples.size() && !std::memcmp(sessSamples[n].rt, a.rt, sizeof a.rt) && !std::memcmp(sessSamples[n].tr, a.tr, sizeof a.tr) && sessSamples[n].pc == a.pc) continue;
+                if (n - s0 >= 4) {
+                    int mn[3] = {99999, 99999, 99999}, mx[3] = {-99999, -99999, -99999};
+                    for (size_t q = s0; q < n; ++q) {
+                        const int v[3] = {sessSamples[q].vx, sessSamples[q].vy, sessSamples[q].vz};
+                        for (int k = 0; k < 3; ++k) { mn[k] = std::min(mn[k], v[k]); mx[k] = std::max(mx[k], v[k]); }
+                    }
+                    std::fprintf(sessFile, "G %08x %zu %d %d %d %d %d %d %d %d %d T %d %d %d V %d %d %d %d %d %d\n", a.pc, n - s0, int16_t(a.rt[0]), int16_t(a.rt[0] >> 16), int16_t(a.rt[1]), int16_t(a.rt[1] >> 16), int16_t(a.rt[2]), int16_t(a.rt[2] >> 16),
+                                 int16_t(a.rt[3]), int16_t(a.rt[3] >> 16), int16_t(a.rt[4]), a.tr[0], a.tr[1], a.tr[2], mn[0], mx[0], mn[1], mx[1], mn[2], mx[2]);
+                }
+                s0 = n;
+            }
+            sessSamples.clear();
+        }
+        if (gteDump && p.cpu.gteSamples == &dumpSamples && p.frames > gteDump) {   // tool: what the GTE projected during one frame, in groups of equal matrices
+            p.cpu.gteSamples = nullptr;
+            std::printf("[gte] %zu vertices projected in frame %llu\n", dumpSamples.size(), (unsigned long long)p.frames);
+            size_t s0 = 0;
+            for (size_t n = 1; n <= dumpSamples.size(); ++n) {
+                const auto& a = dumpSamples[s0];
+                if (n < dumpSamples.size() && !std::memcmp(dumpSamples[n].rt, a.rt, sizeof a.rt) && !std::memcmp(dumpSamples[n].tr, a.tr, sizeof a.tr)) continue;
+                int mnx = 99999, mxx = -99999, mny = 99999, mxy = -99999, mnz = 99999, mxz = -99999;
+                float sxmn = 1e9f, sxmx = -1e9f, symn = 1e9f, symx = -1e9f, zmn = 1e9f, zmx = 0;
+                for (size_t q = s0; q < n; ++q) {
+                    const auto& v = dumpSamples[q];
+                    mnx = std::min<int>(mnx, v.vx); mxx = std::max<int>(mxx, v.vx); mny = std::min<int>(mny, v.vy); mxy = std::max<int>(mxy, v.vy); mnz = std::min<int>(mnz, v.vz); mxz = std::max<int>(mxz, v.vz);
+                    sxmn = std::min(sxmn, v.sx); sxmx = std::max(sxmx, v.sx); symn = std::min(symn, v.sy); symx = std::max(symx, v.sy); zmn = std::min(zmn, v.sz); zmx = std::max(zmx, v.sz);
+                }
+                if (n - s0 >= 6) std::printf("[gte] n=%zu pc=%08x R=%d,%d,%d,%d,%d,%d,%d,%d,%d T=%d,%d,%d H=%u ofs=%d,%d V x%d..%d y%d..%d z%d..%d screen x%.0f..%.0f y%.0f..%.0f sz%.0f..%.0f\n", n - s0, a.pc, int16_t(a.rt[0]), int16_t(a.rt[0] >> 16), int16_t(a.rt[1]), int16_t(a.rt[1] >> 16), int16_t(a.rt[2]), int16_t(a.rt[2] >> 16), int16_t(a.rt[3]), int16_t(a.rt[3] >> 16), int16_t(a.rt[4]), a.tr[0], a.tr[1], a.tr[2], a.h, a.ofx >> 16, a.ofy >> 16, mnx, mxx, mny, mxy, mnz, mxz, sxmn, sxmx, symn, symx, zmn, zmx);
+                s0 = n;
+            }
+            if (const char* csv = std::getenv("CB2_GTEDUMPCSV")) if (FILE* f = std::fopen(csv, "w")) {   // every projected vertex: input, result, matrix, address
+                for (const auto& v : dumpSamples) std::fprintf(f, "%08x,%d,%d,%d,%.2f,%.2f,%.0f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", v.pc, v.vx, v.vy, v.vz, v.sx, v.sy, v.sz, int16_t(v.rt[0]), int16_t(v.rt[0] >> 16), int16_t(v.rt[1]), int16_t(v.rt[1] >> 16), int16_t(v.rt[2]), int16_t(v.rt[2] >> 16), int16_t(v.rt[3]), int16_t(v.rt[3] >> 16), int16_t(v.rt[4]), v.tr[0], v.tr[1], v.tr[2], v.ofx >> 16, v.ofy >> 16);
+                std::fclose(f);
+            }
+            if (p.cpu.dbgPc && std::getenv("CB2_REGLOG")) {   // tool: which registers hold a few distinct values over all executions of CB2_REGPC (section pointers, ...)
+                const size_t n = p.cpu.dbgLog.size() / 32;
+                for (int q = 1; q < 32; ++q) {
+                    std::map<uint32_t, size_t> vals;
+                    for (size_t i = 0; i < n; ++i) ++vals[p.cpu.dbgLog[i * 32 + size_t(q)]];
+                    if (vals.size() > 12) continue;
+                    std::printf("[reglog] r%d:", q);
+                    for (auto& [v, c] : vals) std::printf(" %08x x%zu", v, c);
+                    std::printf("\n");
+                }
+            }
+            if (p.cpu.dbgPc) { std::printf("[regs] hits %u:", p.cpu.dbgHits); for (int i = 0; i < 32; ++i) std::printf(" r%d=%08x", i, p.cpu.dbgRegs[i]); std::printf("\n"); p.cpu.dbgPc = 0; }
+            if (const char* pk = std::getenv("CB2_PEEK")) {   // tool: CB2_PEEK=hexaddr:wordcount
+                const uint32_t a0 = uint32_t(std::strtoul(pk, nullptr, 16)); const char* col = std::strchr(pk, ':'); const int n = col ? std::atoi(col + 1) : 16;
+                for (int i = 0; i < n; ++i) std::printf("[find] %08x: %08x\n", a0 + 4 * i, p.peek32(a0 + 4 * i));
+            }
+            if (const char* fw = std::getenv("CB2_FINDWORD")) {   // tool: where is this 32-bit value in RAM?
+                const uint32_t want = uint32_t(std::strtol(fw, nullptr, 0));
+                for (uint32_t a = 0x80000000u; a < 0x80000000u + 0x200000u; a += 4) if (p.peek32(a) == want) std::printf("[find] %08x = %d: next words %d %d %d\n", a, int(want), int(p.peek32(a + 4)), int(p.peek32(a + 8)), int(p.peek32(a + 12)));
+            }
+            std::fflush(stdout);
+            break;
+        }
         }
         if (!err.empty()) { std::fprintf(stderr, "guest stopped: %s\n", err.c_str()); break; }
 
@@ -773,6 +973,8 @@ int main(int argc, char** argv) {
             else interp.reset();
             hires.setTextureFilter(settings.textures);
             hires.setPerspective(settings.perspective);
+            hires.setNativeWorld(nativeWanted ? &nativeWorld : nullptr);
+            hires.setNativeViews(nwNewest, nwCur);
             {   // widescreen: how much wider than 4:3 the window is (capped at 21:9)
                 int ww = 0, wh = 0;
                 glfwGetFramebufferSize(win, &ww, &wh);
@@ -793,12 +995,14 @@ int main(int argc, char** argv) {
                 const float tt = float(std::max(0.0, std::min(1.0, 1.0 - (e - double(pairFrames)) / 2.0)));
                 if (tt > 0.002f) {
                     interp.build(tt, midCmds, midTexts);
+                    hires.setNativeViews(nwNewest, lerpView(nwCur, nwPrev, tt));
                     hires.renderMid(midCmds, midTexts, p.gpu.hres, p.gpu.vres, p.gpu.displayX, p.gpu.displayY);
                     showMid = true;
                 }
             } else if (flipped && interp.canInterpolate() && interp.flipStamp() == uint32_t(p.gpu.vblankCount)) {   // the flip belongs to this very vertical blank
                 psx::FrameInterpolator::Stats st;
                 interp.build(smoothT, midCmds, midTexts, &st);
+                hires.setNativeViews(nwNewest, lerpView(nwCur, nwPrev, smoothT));
                 hires.renderMid(midCmds, midTexts, p.gpu.hres, p.gpu.vres, p.gpu.displayX, p.gpu.displayY);
                 showMid = true;
                 static const bool smoothLog = std::getenv("CB2_SMOOTHLOG") != nullptr;
@@ -907,6 +1111,9 @@ int main(int argc, char** argv) {
         const cb2menu::Result menuResult = menu.takeResult();
         if (menuResult == cb2menu::Result::Quit) quitRequested = true;
         else if (menuResult == cb2menu::Result::MainMenu) { quitRequested = true; relaunch = true; }
+        else if (menuResult == cb2menu::Result::ReportBug) {
+            menu.toast(cb2crash::openIssue(CB2_UPDATE_REPO, "Bug report", cb2crash::reportText("")) ? "OPENING THE BUG REPORT IN YOUR BROWSER" : "CANNOT OPEN THE BROWSER", glfwGetTime());
+        }
         if (menu.takeChanged()) saveSettings();
         if (captureNow && windowCapture) {
             std::vector<uint8_t> px(size_t(fw) * size_t(fh) * 4);

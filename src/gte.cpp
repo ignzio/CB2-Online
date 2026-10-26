@@ -2,6 +2,7 @@
 // Verified against 1,150 register/opcode captures taken from real hardware (tools/gte_tests_convert.py, cb2_gtetest).
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 
 #include "r3000.hpp"
 
@@ -99,6 +100,8 @@ struct Exec {
     PgxpMap* pgxp = nullptr;
     std::vector<std::array<float, 3>>* capture = nullptr;
     std::vector<GteSample>* samples = nullptr;
+    std::vector<GteSample>* samples2 = nullptr;
+    uint32_t insnPc = 0;
 
     void matrix(int base, int32_t m[3][3]) const {
         for (int r = 0; r < 3; ++r)
@@ -156,9 +159,11 @@ struct Exec {
             if (pgxp->size() > (1u << 18)) pgxp->clear();
             (*pgxp)[d[14]] = {clampf(double(x) / 65536.0), clampf(double(y) / 65536.0), float(d[19] & 0xFFFF)};
         }
-        if (samples) {
-            GteSample s{{c[0], c[1], c[2], c[3], c[4]}, {int32_t(c[5]), int32_t(c[6]), int32_t(c[7])}, float(double(x) / 65536.0), float(double(y) / 65536.0), float(d[19] & 0xFFFF)};
-            samples->push_back(s);
+        if (samples || samples2) {
+            GteSample s{{c[0], c[1], c[2], c[3], c[4]}, {int32_t(c[5]), int32_t(c[6]), int32_t(c[7])}, float(double(x) / 65536.0), float(double(y) / 65536.0), float(d[19] & 0xFFFF),
+                        int16_t(v[0]), int16_t(v[1]), int16_t(v[2]), insnPc, int32_t(c[24]), int32_t(c[25]), uint16_t(c[26])};
+            if (samples) samples->push_back(s);
+            if (samples2) samples2->push_back(s);
         }
         if (capture) capture->push_back({float(double(x) / 65536.0), float(double(y) / 65536.0), float(d[19] & 0xFFFF)});
         if (!last) return;
@@ -385,6 +390,12 @@ void Cpu::gteCommand(uint32_t cmd) {
     e.pgxp = pgxp;
     e.capture = sxyCapture;
     e.samples = gteSamples;
+    e.samples2 = gteSamples2;
+    e.insnPc = gteInsnPc;
+    if (dbgPc && gteInsnPc == dbgPc) {
+        if (dbgHits++ == 0) std::memcpy(dbgRegs, r, sizeof r);
+        if (dbgLog.size() < 32u * 6000u) dbgLog.insert(dbgLog.end(), r, r + 32);
+    }
     e.run(cmd);
 }
 

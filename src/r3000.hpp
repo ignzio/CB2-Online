@@ -28,6 +28,10 @@ struct GteSample {
     uint32_t rt[5];     // control registers 0-4: rotation matrix
     int32_t tr[3];      // control registers 5-7: translation
     float sx, sy, sz;
+    int16_t vx, vy, vz;   // the vertex as it was loaded into the GTE (before the matrix)
+    uint32_t pc;          // address of the RTPS/RTPT instruction
+    int32_t ofx, ofy;     // screen offsets (16.16) and projection distance H at that moment
+    uint16_t h;
 };
 
 struct Cpu {
@@ -44,6 +48,7 @@ struct Cpu {
     // was drawn on screen (name tags of other players).
     std::vector<std::array<float, 3>>* sxyCapture = nullptr;
     std::vector<GteSample>* gteSamples = nullptr;   // when set, every projected vertex is recorded here
+    std::vector<GteSample>* gteSamples2 = nullptr;  // a second consumer of the same record (the native world renderer)
     uint64_t instructions = 0;
     int64_t budget = INT64_MAX;                // decremented by CB2_TICK in recompiled code
     bool fault = false;                        // set when an unmapped address was touched
@@ -159,6 +164,9 @@ struct Cpu {
     uint32_t gteReadCtrl(uint32_t reg);
     void gteWriteCtrl(uint32_t reg, uint32_t v);
     void gteCommand(uint32_t cmd);
+    uint32_t gteInsnPc = 0;   // address of the COP2 instruction being executed (for tools)
+    std::vector<uint32_t> dbgLog;   // tool: the registers at every execution of dbgPc, 32 words each
+    uint32_t dbgPc = 0, dbgRegs[32] = {}, dbgHits = 0;   // tools: registers at the first execution of the GTE instruction at dbgPc (dbgHits counts them)
 };
 
 #ifdef CB2_BUDGET

@@ -1,6 +1,7 @@
 #pragma once
 // PlayStation GPU: GP0/GP1 command interpreter with a software rasteriser writing into a 1024x512 VRAM.
 #include <array>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 #include <cstdint>
@@ -23,6 +24,7 @@ struct GpuCmd {
     uint8_t semiMode = 0, depth = 0, tpx = 0, tpy = 0, twMX = 0, twMY = 0, twOX = 0, twOY = 0;
     uint16_t clutX = 0, clutY = 0;
     uint8_t alpha = 255;                   // Tri: opacity the host renderer gives it (other players' Crashes, see markAlpha); 255 = the game's own look
+    bool world = false;                    // Tri: part of the level scenery (see Gpu::tagWorld); a native world renderer draws these itself
     int16_t area[4] = {};                  // draw area x0 y0 x1 y1 (inclusive)
     // Fill / Upload: VRAM rectangle. Upload carries the final pixels (offset into Gpu::cmdPool). Flip: the display area moved to rx, ry (size rw x rh) after vertical blank number "color".
     int16_t rx = 0, ry = 0, rw = 0, rh = 0;
@@ -60,6 +62,11 @@ public:
     void markAlpha(float sx, float sy) { alphaKeys.insert(alphaKey(sx + float(offX), sy + float(offY))); }
     static uint64_t alphaKey(float x, float y) { return (uint64_t(uint32_t(int32_t(x * 8.0f + 0.5f + 65536.0f))) << 32) | uint32_t(int32_t(y * 8.0f + 0.5f + 65536.0f)); }
     std::unordered_set<uint64_t> alphaKeys;
+    // A vertex the GTE projected: its screen position before the draw offset, and a number the caller gave it.
+    struct WorldPoint { float x = 0, y = 0; uint64_t id = 0; };
+    // For every recorded triangle whose three corners are among `points`, asks `decide(ids of the corners, semi-transparent)`; when it answers true the triangle is marked as level
+    // scenery (GpuCmd::world). Returns how many were marked; `offset` receives the draw offset of the first one.
+    size_t tagWorld(const std::vector<WorldPoint>& points, const std::function<bool(const uint64_t*, bool)>& decide, std::array<int, 2>* offset = nullptr);
     void flushTags() {
         alphaKeys.clear();
         if (pendingTags.empty()) return;
@@ -114,6 +121,7 @@ private:
     bool dither = false, drawToDisplay = false, texDisable = false, rectFlipX = false, rectFlipY = false;
     int twMaskX = 0, twMaskY = 0, twOffX = 0, twOffY = 0;
     int areaX0 = 0, areaY0 = 0, areaX1 = 1023, areaY1 = 511, offX = 0, offY = 0;
+    std::vector<std::array<int, 2>> drawOffsets;   // the draw offsets the recorded triangles used since the last tagWorld
     bool setMask = false, checkMask = false;
     int dir = 0, field = 0;
     uint32_t infoLatch = 0;
