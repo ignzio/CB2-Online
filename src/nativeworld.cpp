@@ -380,7 +380,8 @@ void NativeWorld::commit(uint32_t frameId, bool extend, const float cam[3], floa
         if (d2 < farZ * farZ) sectionUsed[s] = 1;
     }
     for (size_t p = 0; p < polyFirst.size(); ++p) {
-        if (drawnRecently(p) || !sectionUsed[polySection[p]] || polySemi[p]) continue;
+        // see-through polygons too: in the margins nothing else would draw them, and the surface behind them is the same geometry
+        if (polyStamp[p] == frameId || !sectionUsed[polySection[p]]) continue;   // only what the game draws in this very picture is left to the ordered pass: what it drew a frame ago and culled now still has to be there
         for (uint32_t k = 0; k < polyTris[p]; ++k)
             for (uint32_t c = 0; c < 3; ++c) index.push_back((polyFirst[p] + k) * 3 + c);
     }
@@ -415,6 +416,8 @@ void NativeWorld::setup(const NativeView& v, float widen, GLuint element) {
 }
 
 void NativeWorld::drawExtras(const NativeView& v, float widen) {
+    static const int part = std::getenv("CB2_NWPART") ? std::atoi(std::getenv("CB2_NWPART")) : 0;   // tool: 1 = no extras, 2 = no ordered polygons
+    if (part == 1) return;
     farLimit = v.farZ;
     if (!ready() || !v.valid || !extraCount) return;
     // the extra polygons are not in the game's order: they get a depth buffer among themselves
@@ -430,6 +433,8 @@ void NativeWorld::drawExtras(const NativeView& v, float widen) {
 }
 
 void NativeWorld::drawRun(const NativeView& v, const std::vector<uint32_t>& polygons, float widen) {
+    static const int part = std::getenv("CB2_NWPART") ? std::atoi(std::getenv("CB2_NWPART")) : 0;
+    if (part == 2) return;
     farLimit = 1e9f;
     if (!ready() || !v.valid || polygons.empty()) return;
     // The scenery polygons in the order the game drew them (its painter's algorithm: no depth buffer, a nearer polygon can be drawn first and be covered by a farther one).

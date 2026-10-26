@@ -344,6 +344,7 @@ int main(int argc, char** argv) {
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     GLFWwindow* win = glfwCreateWindow(windowW, windowH, "Crash Bandicoot 2 (native port)", nullptr, nullptr);
     if (!win) { psx::showError("cannot create an OpenGL 3.3 window (update the graphics driver)"); return 1; }
+    if (std::getenv("CB2_MAXIMIZED") && !hidden) glfwMaximizeWindow(win);   // tool: the window as a player has it when the game fills the screen
     glfwMakeContextCurrent(win);
     glfwSwapInterval(0);
     if (!gladLoadGL(glfwGetProcAddress)) return 1;
@@ -576,10 +577,14 @@ int main(int argc, char** argv) {
     uint32_t nwTried = 0xFFFFFFFFu;
     cb2::NativeView nwNewest, nwCur, nwPrev;   // the camera of the frame being drawn, of the last frame shown and of the one before it
     std::vector<std::vector<psx::Gpu::WorldPoint>> nwPoints;
+    std::vector<float> nwFarHist;
+    uint64_t nwLastFrames = ~0ull;
     std::array<int, 2> nwDrawOff{0, 0};
     float nwOfs[2] = {256, 120};
     uint64_t nwFlipSeen = 0;
     bool nativeWanted = false;
+    float lastTt = 0;
+    cb2::NativeView lastMidView;
     auto lerpView = [](const cb2::NativeView& a, const cb2::NativeView& b, float t) {
         cb2::NativeView r = a;
         float jump = 0;
@@ -805,6 +810,7 @@ int main(int argc, char** argv) {
                 if (!(p.disc.readFile(name, file) && nativeWorld.load(file, lvl))) nativeWorld.clear();
                 nwNewest = nwCur = nwPrev = cb2::NativeView{};
                 nwPoints.clear();
+                nwFarHist.clear();
             }
             const uint32_t frameId = uint32_t(p.gpu.flipCount) + 1;
             std::vector<psx::Gpu::WorldPoint> pts;
@@ -815,7 +821,7 @@ int main(int argc, char** argv) {
                 float camGame[3];
                 for (int k = 0; k < 3; ++k) camGame[k] = float(int32_t(p.peek32(0x80060768u + 4u * uint32_t(k))));
                 std::vector<std::array<int, 3>> vs;
-                float runFar = 0;
+                float runFar = 0, passFar = 0;
                 std::vector<std::array<float, 2>> runPts;
                 const r3000::GteSample* first = nullptr;
                 auto flushRun = [&] {
@@ -836,7 +842,7 @@ int main(int argc, char** argv) {
                         nwNewest.h = float(first->h);
                         nwOfs[0] = float(first->ofx >> 16);
                         nwOfs[1] = float(first->ofy >> 16);
-                        nwNewest.farZ = std::max(4000.0f, runFar * 1.15f);
+                        passFar = std::max(passFar, runFar);
                         nwNewest.valid = true;
                     }
                     vs.clear();
@@ -854,10 +860,21 @@ int main(int argc, char** argv) {
                     runPts.push_back({s.sx, s.sy});
                 }
                 flushRun();
+                // the draw distance: the farthest depth the game projected, over the last few passes (a pass can hold only half a picture)
+                if (passFar > 0) {
+                    nwFarHist.push_back(passFar);
+                    if (nwFarHist.size() > 6) nwFarHist.erase(nwFarHist.begin());
+                }
+                if (!nwFarHist.empty()) { static const float farMin = std::getenv("CB2_NWFARMIN") ? float(std::atof(std::getenv("CB2_NWFARMIN"))) : 6000.0f; nwNewest.farZ = std::max(farMin, *std::max_element(nwFarHist.begin(), nwFarHist.end()) * 1.15f); }
             }
             // the polygons the game draws for the scenery are the ones whose corners the GTE projected in the last few passes
-            nwPoints.push_back(std::move(pts));
-            if (nwPoints.size() > 3) nwPoints.erase(nwPoints.begin());
+            // Only a pass that ran the emulation counts: at a high refresh rate this block also runs between passes, and an empty entry would push the vertices of the previous pass out of the history
+            // (the next pass then cannot match the triangles the game draws for vertices it projected a pass earlier, and shows its own polygons, with the margins black).
+            if (nwLastFrames != p.frames) {
+                nwLastFrames = p.frames;
+                nwPoints.push_back(std::move(pts));
+                if (nwPoints.size() > 3) nwPoints.erase(nwPoints.begin());
+            }
             if (nwNewest.valid && !runFailed) {
                 std::vector<psx::Gpu::WorldPoint> all;
                 for (const auto& v : nwPoints) all.insert(all.end(), v.begin(), v.end());
@@ -867,12 +884,20 @@ int main(int argc, char** argv) {
                 if (p.gpu.tagWorld(all, [&](const uint64_t* ids, psx::GpuCmd& c) {
                         const uint32_t poly = nativeWorld.claim(ids, c.semi, frameId, nwPass);
                         c.nativePoly = poly;
-                        // the game's own scenery polygons are not drawn at all: what it made up (split near polygons) is replaced by the whole level polygons, and only the see-through ones stay
-                        return poly != cb2::NativeWorld::kNoPolygon || !c.semi;
+                        if (poly != cb2::NativeWorld::kNoPolygon) return true;
+                        // not a polygon of the native mesh: what the game made up (corners that are not in the level file: split near polygons) is replaced by the whole level polygons and dropped;
+                        // a triangle of real level vertices that the mesh does not have (a polygon whose texture could not be resolved) and the see-through ones stay the game's
+                        const bool madeUp = ids[0] >= (1ull << 62) || ids[1] >= (1ull << 62) || ids[2] >= (1ull << 62);
+                        return madeUp && !c.semi;
                     }, &off)) nwDrawOff = off;
                 nativeWorld.commit(frameId, true, nwNewest.cam, nwNewest.farZ);
                 nwNewest.ofx = nwOfs[0];
                 nwNewest.ofy = nwOfs[1];
+            }
+            if (std::getenv("CB2_NWLOG")) {
+                size_t tris = 0, tagged = 0, replaced = 0, flips = 0;
+                for (const auto& c : p.gpu.cmds) { if (c.kind == psx::GpuCmd::Kind::Tri) { ++tris; tagged += c.world; replaced += c.world && c.nativePoly != cb2::NativeWorld::kNoPolygon; } else if (c.kind == psx::GpuCmd::Kind::Flip) ++flips; }
+                std::printf("[nwpass] frame %llu: %zu triangles, %zu scenery, %zu replaced natively, %zu flips, newest %d failed %d\n", (unsigned long long)p.frames, tris, tagged, replaced, flips, nwNewest.valid, runFailed);
             }
             if (p.gpu.flipCount != nwFlipSeen) { nwFlipSeen = p.gpu.flipCount; nwPrev = nwCur; nwCur = nwNewest; }
             nwSamples.clear();
@@ -1008,16 +1033,17 @@ int main(int argc, char** argv) {
             if (contMode && pairValid && !fast) {
                 const double e = (glfwGetTime() - t0) * 59.94 + double(base);
                 const float tt = float(std::max(0.0, std::min(1.0, 1.0 - (e - double(pairFrames)) / 2.0)));
+                lastTt = tt;
                 if (tt > 0.002f) {
                     interp.build(tt, midCmds, midTexts);
-                    hires.setNativeViews(nwNewest, lerpView(nwCur, nwPrev, tt));
+                    { const cb2::NativeView mv = lerpView(nwCur, nwPrev, tt); lastMidView = mv; hires.setNativeViews(nwNewest, mv); }
                     hires.renderMid(midCmds, midTexts, p.gpu.hres, p.gpu.vres, p.gpu.displayX, p.gpu.displayY);
                     showMid = true;
                 }
             } else if (flipped && interp.canInterpolate() && interp.flipStamp() == uint32_t(p.gpu.vblankCount)) {   // the flip belongs to this very vertical blank
                 psx::FrameInterpolator::Stats st;
                 interp.build(smoothT, midCmds, midTexts, &st);
-                hires.setNativeViews(nwNewest, lerpView(nwCur, nwPrev, smoothT));
+                { const cb2::NativeView mv = lerpView(nwCur, nwPrev, smoothT); lastMidView = mv; hires.setNativeViews(nwNewest, mv); }
                 hires.renderMid(midCmds, midTexts, p.gpu.hres, p.gpu.vres, p.gpu.displayX, p.gpu.displayY);
                 showMid = true;
                 static const bool smoothLog = std::getenv("CB2_SMOOTHLOG") != nullptr;
@@ -1140,6 +1166,58 @@ int main(int argc, char** argv) {
             stbi_write_png(capturePath.c_str(), fw, fh, 4, px.data(), fw * 4);
             std::printf("window captured at frame %llu to %s (%dx%d), path %s\n", (unsigned long long)p.frames, capturePath.c_str(), fw, fh, hiPath ? "opengl" : "software");
             break;
+        }
+        if (const char* fl = std::getenv("CB2_FLICKER")) {   // tool: reads back every presented picture, logs its brightness and keeps the dark ones (CB2_FLICKER=dir, CB2_FLICKER_FROM=frame)
+            static const uint64_t from = std::getenv("CB2_FLICKER_FROM") ? std::strtoull(std::getenv("CB2_FLICKER_FROM"), nullptr, 10) : 0;
+            static double prevMean = -1;
+            static int saved = 0, presents = 0;
+            if (p.frames >= from && !paused && fw > 0 && fh > 0) {
+                // a small copy of the picture is enough to see its brightness; the full picture is read only when it looks dark
+                static GLuint smallFbo = 0, smallTex = 0;
+                if (!smallFbo) {
+                    glGenTextures(1, &smallTex);
+                    glBindTexture(GL_TEXTURE_2D, smallTex);
+                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 128, 72, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+                    glGenFramebuffers(1, &smallFbo);
+                    glBindFramebuffer(GL_FRAMEBUFFER, smallFbo);
+                    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, smallTex, 0);
+                    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                }
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, smallFbo);
+                glBlitFramebuffer(0, 0, fw, fh, 0, 0, 128, 72, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+                glBindFramebuffer(GL_FRAMEBUFFER, smallFbo);
+                static uint8_t small[128 * 72 * 4];
+                glPixelStorei(GL_PACK_ALIGNMENT, 1);
+                glReadPixels(0, 0, 128, 72, GL_RGBA, GL_UNSIGNED_BYTE, small);
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                double sum = 0; size_t n = 0;
+                for (size_t i = 0; i + 2 < sizeof small; i += 4) { sum += small[i] + small[i + 1] + small[i + 2]; ++n; }
+                const double mean = sum / double(n) / 3.0;
+                ++presents;
+                // pixels that were lit in the last picture and are black now (a part of the world that was not drawn)
+                static uint8_t prevSmall[128 * 72 * 4];
+                int blackened = 0;
+                if (presents > 1)
+                    for (size_t i = 0; i < sizeof small; i += 4) {
+                        const int a = prevSmall[i] + prevSmall[i + 1] + prevSmall[i + 2], b = small[i] + small[i + 1] + small[i + 2];
+                        if (a > 90 && b < 18) ++blackened;
+                    }
+                std::memcpy(prevSmall, small, sizeof small);
+                std::printf("[flicker] present %d frame %llu mean %.1f blackened %d mid %d tt %.3f nwNewest %d nwCur %d nwPrev %d midview %d farZ %.0f cam %.0f,%.0f,%.0f prevcam %.0f,%.0f,%.0f\n", presents, (unsigned long long)p.frames, mean, blackened, showMid ? 1 : 0, double(lastTt), nwNewest.valid, nwCur.valid, nwPrev.valid, lastMidView.valid, double(lastMidView.farZ), double(nwCur.cam[0]), double(nwCur.cam[1]), double(nwCur.cam[2]), double(nwPrev.cam[0]), double(nwPrev.cam[1]), double(nwPrev.cam[2]));
+                if (presents > 1 && blackened > 60 && saved < 8) {
+                    std::vector<uint8_t> px(size_t(fw) * size_t(fh) * 4);
+                    glReadBuffer(GL_BACK);
+                    glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+                    char name[64];
+                    std::snprintf(name, sizeof name, "/dark%02d.png", saved++);
+                    for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
+                    stbi_flip_vertically_on_write(1);
+                    std::filesystem::create_directories(fl);
+                    stbi_write_png((std::string(fl) + name).c_str(), fw, fh, 4, px.data(), fw * 4);
+                }
+                prevMean = prevMean < 0 ? mean : prevMean * 0.9 + mean * 0.1;
+            }
         }
         const int wantVsync = settings.vsync && !captureFrame && !hidden ? 1 : 0;
         if (wantVsync != appliedVsync) { glfwSwapInterval(wantVsync); appliedVsync = wantVsync; }
