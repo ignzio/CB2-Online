@@ -289,20 +289,22 @@ bool NativeWorld::solveCamera(const std::vector<std::array<int, 3>>& v, const in
         for (const auto& p : v) ++count[(-p[size_t(k)]) & 15];
         res[k] = int(std::max_element(count, count + 16) - count);
     }
-    const size_t n = std::min<size_t>(v.size(), 6);
-    std::array<int, 3> probe[6];
+    // Some of the projected vertices are not in the level (corners the game made up when it split a polygon): the position is accepted when most of a sample of them are.
+    const size_t n = std::min<size_t>(v.size(), 24);
+    std::array<int, 3> probe[24];
     for (size_t i = 0; i < n; ++i) probe[i] = v[i * v.size() / n];
     std::vector<int> axis[3];
     for (int k = 0; k < 3; ++k)
         for (int c = guess[k] - radius; c <= guess[k] + radius; ++c)
             if (((c - res[k]) & 15) == 0) axis[k].push_back(c);
+    const size_t allowedMisses = n / 3;
     for (int cx : axis[0])
         for (int cy : axis[1])
             for (int cz : axis[2]) {
                 size_t missed = 0;
-                for (size_t i = 0; i < n && missed < 2; ++i)
+                for (size_t i = 0; i < n && missed <= allowedMisses; ++i)
                     if (!lookup.count(worldKey(probe[i][0] + cx, probe[i][1] + cy, probe[i][2] + cz))) ++missed;
-                if (missed < 2) { cam[0] = cx; cam[1] = cy; cam[2] = cz; return true; }
+                if (missed <= allowedMisses) { cam[0] = cx; cam[1] = cy; cam[2] = cz; return true; }
             }
     return false;
 }
@@ -311,23 +313,34 @@ float NativeWorld::observe(const std::vector<std::array<int, 3>>& v, const float
     ids.assign(v.size(), kNoVertex);
     if (!ready() || v.empty()) return 0.0f;
     const int ram[3] = {int(std::lround(camGame[0])), int(std::lround(camGame[1])), int(std::lround(camGame[2]))};
-    int cam[3];
-    bool ok = false;
-    if (haveCam) ok = solveCamera(v, lastCam, 112, cam);
-    if (!ok) ok = solveCamera(v, ram, 112, cam);
-    if (!ok) ok = solveCamera(v, ram, 800, cam);
-    if (!ok && haveCam) ok = solveCamera(v, lastCam, 800, cam);
-    if (!ok) { haveCam = false; return 0.0f; }
-    haveCam = true;
-    std::copy(cam, cam + 3, lastCam);
-    for (int k = 0; k < 3; ++k) camOut[k] = float(cam[k]);
-    size_t hits = 0;
-    for (size_t i = 0; i < v.size(); ++i) {
-        const uint64_t key = worldKey(v[i][0] + cam[0], v[i][1] + cam[1], v[i][2] + cam[2]);
-        if (!lookup.count(key)) continue;
-        ids[i] = key;
-        ++hits;
+    // One run of projections with one matrix can hold several pictures (the camera moves between them but its matrix may not change): the run is solved in segments, each with its own
+    // camera position, found from a window of consecutive vertices (they belong to one picture).
+    constexpr size_t kWindow = 64, kGap = 40;
+    size_t pos = 0, hits = 0;
+    bool any = false;
+    while (pos < v.size()) {
+        const size_t end = std::min(v.size(), pos + kWindow);
+        const std::vector<std::array<int, 3>> win(v.begin() + std::ptrdiff_t(pos), v.begin() + std::ptrdiff_t(end));
+        int cam[3];
+        bool ok = false;
+        if (haveCam) ok = solveCamera(win, lastCam, 240, cam);
+        if (!ok) ok = solveCamera(win, ram, 240, cam);
+        if (!ok) ok = solveCamera(win, ram, 1200, cam);
+        if (!ok && haveCam) ok = solveCamera(win, lastCam, 1200, cam);
+        if (!ok) { pos = end; continue; }
+        haveCam = true;
+        std::copy(cam, cam + 3, lastCam);
+        for (int k = 0; k < 3; ++k) camOut[k] = float(cam[k]);
+        any = true;
+        // this camera holds as long as vertices keep being found (made-up corners of split polygons are scattered between them)
+        size_t i = pos, misses = 0, lastHit = pos;
+        for (; i < v.size() && misses < kGap; ++i) {
+            const uint64_t key = worldKey(v[i][0] + cam[0], v[i][1] + cam[1], v[i][2] + cam[2]);
+            if (lookup.count(key)) { ids[i] = key; ++hits; misses = 0; lastHit = i; } else ++misses;
+        }
+        pos = lastHit + 1;
     }
+    if (!any) haveCam = false;
     return float(hits) / float(v.size());
 }
 

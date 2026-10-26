@@ -808,6 +808,7 @@ int main(int argc, char** argv) {
             }
             const uint32_t frameId = uint32_t(p.gpu.flipCount) + 1;
             std::vector<psx::Gpu::WorldPoint> pts;
+            bool runFailed = false;   // the camera of some projection could not be found: this pass is left to the game's own polygons
             if (nativeWorld.ready()) {
                 // the samples of the level's projections, in runs of one camera matrix (a pass can hold the end of one frame and the start of the next)
                 static const bool nwLog = std::getenv("CB2_NWLOG") != nullptr;
@@ -825,6 +826,7 @@ int main(int argc, char** argv) {
                     // every scenery vertex the game projected is a scenery point; the ones that are not in the level file (corners the game made up when it split a near polygon) get a number that matches no polygon
                     for (size_t i = 0; i < ids.size(); ++i) pts.push_back({runPts[i][0], runPts[i][1], ids[i] != cb2::NativeWorld::kNoVertex ? ids[i] : (1ull << 62) + i});
                     if (nwLog) std::printf("[nw] frame %llu: %zu scenery vertices, %.1f%% found in the level; camera %.0f %.0f %.0f (game %.0f %.0f %.0f)\n", (unsigned long long)p.frames, vs.size(), explained * 100.0f, cam[0], cam[1], cam[2], camGame[0], camGame[1], camGame[2]);
+                    if (explained <= 0.5f) runFailed = true;
                     if (explained > 0.5f) {
                         const uint32_t* rt = first->rt;
                         const float m[9] = {float(int16_t(rt[0])), float(int16_t(rt[0] >> 16)), float(int16_t(rt[1])), float(int16_t(rt[1] >> 16)), float(int16_t(rt[2])), float(int16_t(rt[2] >> 16)),
@@ -856,7 +858,7 @@ int main(int argc, char** argv) {
             // the polygons the game draws for the scenery are the ones whose corners the GTE projected in the last few passes
             nwPoints.push_back(std::move(pts));
             if (nwPoints.size() > 3) nwPoints.erase(nwPoints.begin());
-            if (nwNewest.valid) {
+            if (nwNewest.valid && !runFailed) {
                 std::vector<psx::Gpu::WorldPoint> all;
                 for (const auto& v : nwPoints) all.insert(all.end(), v.begin(), v.end());
                 std::array<int, 2> off = nwDrawOff;
