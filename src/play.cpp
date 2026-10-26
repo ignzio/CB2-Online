@@ -821,7 +821,8 @@ int main(int argc, char** argv) {
                     float cam[3];
                     std::vector<uint64_t> ids;
                     const float explained = nativeWorld.observe(vs, camGame, cam, ids);
-                    for (size_t i = 0; i < ids.size(); ++i) if (ids[i] != cb2::NativeWorld::kNoVertex) pts.push_back({runPts[i][0], runPts[i][1], ids[i]});
+                    // every scenery vertex the game projected is a scenery point; the ones that are not in the level file (corners the game made up when it split a near polygon) get a number that matches no polygon
+                    for (size_t i = 0; i < ids.size(); ++i) pts.push_back({runPts[i][0], runPts[i][1], ids[i] != cb2::NativeWorld::kNoVertex ? ids[i] : (1ull << 62) + i});
                     if (nwLog) std::printf("[nw] frame %llu: %zu scenery vertices, %.1f%% found in the level; camera %.0f %.0f %.0f (game %.0f %.0f %.0f)\n", (unsigned long long)p.frames, vs.size(), explained * 100.0f, cam[0], cam[1], cam[2], camGame[0], camGame[1], camGame[2]);
                     if (explained > 0.5f) {
                         const uint32_t* rt = first->rt;
@@ -861,9 +862,10 @@ int main(int argc, char** argv) {
                 if (p.gpu.tagWorld(all, [&](const uint64_t* ids, psx::GpuCmd& c) {
                         const uint32_t poly = nativeWorld.claim(ids, c.semi, frameId, nwPass);
                         c.nativePoly = poly;
-                        return poly != cb2::NativeWorld::kNoPolygon;
+                        // the game's own scenery polygons are not drawn at all: what it made up (split near polygons) is replaced by the whole level polygons, and only the see-through ones stay
+                        return poly != cb2::NativeWorld::kNoPolygon || !c.semi;
                     }, &off)) nwDrawOff = off;
-                nativeWorld.commit(frameId, wideAspect > 1.4f);
+                nativeWorld.commit(frameId, true);
                 nwNewest.ofx = nwOfs[0];
                 nwNewest.ofy = nwOfs[1];
             }

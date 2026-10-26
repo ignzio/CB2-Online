@@ -62,6 +62,9 @@ The level scenery is drawn from the level's .NSF file instead of from the game's
   the memory value is up to a few units off, so the exact one is found by searching for the position where the vertices the GTE projected land on vertices of the level (they lie on a grid of 16).
 - **Which polygons.** The game's own visibility culling is kept: the triangles it sent to the GPU are matched to the level's polygons through their corners, and exactly those are drawn natively
   (the game's copies are skipped). Polygons the game draws see-through (water, ice, glass) are left to the game, as are all models, sprites and the HUD.
+- **The game's own scenery is not drawn at all.** Every triangle the game made from scenery vertices is dropped, including the polygons it splits when they come close to the camera (their made-up corners are
+  not in the level file). The parent polygons of the sections the game drew from are drawn natively instead, under the picture with a depth buffer, so nothing is left blank. Only see-through scenery
+  (portals, water, ice) is still the game's.
 - **Order, not depth.** The game's painter's algorithm lets a polygon that is nearer be covered by one that is farther (a mushroom overlapping a stone block is drawn over it even though the block is
   in front in 3D). A depth buffer shows the geometry as it really is, which looks broken; so each scenery polygon is drawn natively *at the place of the game's triangle in the command list*, with
   no depth test, and the game's other polygons (models, near pieces of subdivided polygons) come in between exactly as they do on the console. Only the extra widescreen polygons use a depth buffer, under the picture.
