@@ -47,10 +47,11 @@ layout(triangle_strip, max_vertices = 3) out;
 in vec3 vColor[]; in vec2 vUv[]; flat in ivec4 vTex[];
 out vec3 fColor; out vec2 fUv; flat out ivec4 fTex;
 uniform float uMinZ;
+uniform float uMaxZ;     // the farthest depth the game drew in this picture (plus some): beyond it a polygon the game did not draw would show what the game culled for distance
 uniform int uCull;       // 0 none, 1 drop clockwise triangles on screen, 2 drop counter-clockwise ones
 void main() {
     float z0 = gl_in[0].gl_Position.w, z1 = gl_in[1].gl_Position.w, z2 = gl_in[2].gl_Position.w;
-    if (min(z0, min(z1, z2)) < uMinZ) return;
+    if (min(z0, min(z1, z2)) < uMinZ || min(z0, min(z1, z2)) > uMaxZ) return;
     if (uCull != 0) {
         vec2 a = gl_in[0].gl_Position.xy / z0, b = gl_in[1].gl_Position.xy / z1, c = gl_in[2].gl_Position.xy / z2;
         float area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
@@ -134,6 +135,7 @@ bool NativeWorld::buildProgram() {
     locPages = glGetUniformLocation(program, "uPages");
     locDepth = glGetUniformLocation(program, "uWorld");
     locMinZ = glGetUniformLocation(program, "uMinZ");
+    locMaxZ = glGetUniformLocation(program, "uMaxZ");
     locCull = glGetUniformLocation(program, "uCull");
     return true;
 }
@@ -153,11 +155,11 @@ void NativeWorld::clear() {
     polyStamp.clear();
     polyPass.clear();
     polyTris.clear();
-    polySeeThrough.clear();
     polySection.clear();
     polyClass.clear();
-    seeThroughClasses.clear();
+    polySemi.clear();
     sectionCount = 0;
+    sectionBox.clear();
     levelId = 0xFFFFFFFFu;
 }
 
@@ -220,6 +222,7 @@ bool NativeWorld::load(const Bytes& nsfFile, uint32_t id) {
                 h = (h ^ uint32_t(gv.blend)) * 3266489917u;
                 h = (h ^ uint32_t(std::lround(gv.uv[0] * 4)) ^ (uint32_t(std::lround(gv.uv[1] * 4)) << 16)) * 668265263u;
                 polyClass.push_back(h);
+                polySemi.push_back(uint8_t(gv.tex[0] >= 0 && gv.blend != 3));   // a textured polygon with a blend mode is drawn see-through (portals, water, glows): the game's
             }
             for (size_t x = 0; x + 2 < corners.size(); ++x)
                 for (size_t y = x + 1; y < corners.size(); ++y)
@@ -231,13 +234,20 @@ bool NativeWorld::load(const Bytes& nsfFile, uint32_t id) {
             lookup.insert(worldKey(v.x * 16 + w->xOffset, v.y * 16 + w->yOffset, v.z * 16 + w->zOffset));
         }
         base += uint32_t(w->vertices.size());
+        {
+            std::array<float, 6> box = {1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f};
+            for (const SceneryVertex& v : w->vertices) {
+                const float q[3] = {float(v.x) * 16.0f + float(w->xOffset), float(v.y) * 16.0f + float(w->yOffset), float(v.z) * 16.0f + float(w->zOffset)};
+                for (int k = 0; k < 3; ++k) { box[size_t(k)] = std::min(box[size_t(k)], q[k]); box[size_t(k) + 3] = std::max(box[size_t(k) + 3], q[k]); }
+            }
+            sectionBox.push_back(box);
+        }
         ++sectionCount;
     }
     triangleCount = mesh.size() / 3;
     if (!triangleCount) return false;
     polyStamp.assign(polyFirst.size(), 0);
     polyPass.assign(polyFirst.size(), 0);
-    polySeeThrough.assign(polyFirst.size(), 0u);
     haveCam = false;
 
     glGenVertexArrays(1, &vao);
@@ -321,27 +331,26 @@ float NativeWorld::observe(const std::vector<std::array<int, 3>>& v, const float
     return float(hits) / float(v.size());
 }
 
-void NativeWorld::markSeeThrough(const uint64_t keys[3], bool seeThrough, uint32_t frameId) {
-    if (!seeThrough) return;
-    const auto range = triples.equal_range(tripleKey(keys[0], keys[1], keys[2]));
-    for (auto it = range.first; it != range.second; ++it) { polySeeThrough[it->second] = frameId; seeThroughClasses.insert(polyClass[it->second]); }
-}
-
 uint32_t NativeWorld::claim(const uint64_t keys[3], bool seeThrough, uint32_t frameId, uint32_t passId) {
     const auto range = triples.equal_range(tripleKey(keys[0], keys[1], keys[2]));
     static const bool dbg = std::getenv("CB2_NWLOG") != nullptr;
     if (dbg) { ++statClaims; if (range.first == range.second) ++statMiss; else if (std::distance(range.first, range.second) > 1) ++statMulti; if (seeThrough) ++statSemi; }
-    if (range.first == range.second || seeThrough) return kNoPolygon;
-    for (auto it = range.first; it != range.second; ++it) if (polySeeThrough[it->second] && polySeeThrough[it->second] + 1 >= frameId) return kNoPolygon;
-    // polygons that share their three corners (a decal over a wall) are separate triangles for the game: each triangle takes the next one that has not been taken in this pass
-    uint32_t pick = range.first->second;
-    for (auto it = range.first; it != range.second; ++it) if (polyPass[it->second] != passId) { pick = it->second; break; }
-    for (auto it = range.first; it != range.second; ++it) polyStamp[it->second] = frameId;
+    // A see-through triangle (a textured polygon with a blend mode) stays the game's. Polygons can share their three corners (a decal over a wall): the game's triangle is matched to the
+    // polygon of its own kind.
+    if (seeThrough) return kNoPolygon;
+    uint32_t pick = kNoPolygon;
+    for (auto it = range.first; it != range.second; ++it) {
+        if (polySemi[it->second]) continue;
+        if (pick == kNoPolygon || polyPass[it->second] != passId) pick = it->second;
+        if (polyPass[it->second] != passId) break;
+    }
+    if (pick == kNoPolygon) return kNoPolygon;
+    for (auto it = range.first; it != range.second; ++it) if (!polySemi[it->second]) polyStamp[it->second] = frameId;
     polyPass[pick] = passId;
     return pick;
 }
 
-void NativeWorld::commit(uint32_t frameId, bool extend) {
+void NativeWorld::commit(uint32_t frameId, bool extend, const float cam[3], float farZ) {
     extraCount = 0;
     if (!ready() || !extend) return;
     // The polygons of the sections the game drew from that it did not draw itself (it culled them at the edge of its 4:3 view): drawn first, under the picture.
@@ -349,8 +358,16 @@ void NativeWorld::commit(uint32_t frameId, bool extend) {
     std::vector<uint8_t> sectionUsed(sectionCount, 0);
     auto drawnRecently = [&](size_t p) { const uint32_t s = polyStamp[p]; return s && s + 1 >= frameId && s <= frameId; };
     for (size_t p = 0; p < polyFirst.size(); ++p) if (drawnRecently(p)) sectionUsed[polySection[p]] = 1;
+    // The game's visibility data picks the sections it draws and culls the rest at the edge of its 4:3 view (what moving the camera shows as polygons popping in at the sides): every
+    // section that is near enough to be seen at all is drawn natively, not only the ones the game drew from.
+    for (uint32_t s = 0; s < sectionCount; ++s) {
+        const auto& b = sectionBox[s];
+        float d2 = 0;
+        for (int k = 0; k < 3; ++k) { const float d = std::max({b[size_t(k)] - cam[k], 0.0f, cam[k] - b[size_t(k) + 3]}); d2 += d * d; }
+        if (d2 < farZ * farZ) sectionUsed[s] = 1;
+    }
     for (size_t p = 0; p < polyFirst.size(); ++p) {
-        if (drawnRecently(p) || !sectionUsed[polySection[p]] || polySeeThrough[p] || seeThroughClasses.count(polyClass[p])) continue;
+        if (drawnRecently(p) || !sectionUsed[polySection[p]] || polySemi[p]) continue;
         for (uint32_t k = 0; k < polyTris[p]; ++k)
             for (uint32_t c = 0; c < 3; ++c) index.push_back((polyFirst[p] + k) * 3 + c);
     }
@@ -375,6 +392,7 @@ void NativeWorld::setup(const NativeView& v, float widen, GLuint element) {
     glUniform1f(locDepth, kWorldScale);
     static const float minZ = std::getenv("CB2_NWMINZ") ? float(std::atof(std::getenv("CB2_NWMINZ"))) : 24.0f;
     glUniform1f(locMinZ, minZ);
+    glUniform1f(locMaxZ, farLimit);
     glUniform1i(locCull, 0);
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, pageTex);
@@ -384,6 +402,7 @@ void NativeWorld::setup(const NativeView& v, float widen, GLuint element) {
 }
 
 void NativeWorld::drawExtras(const NativeView& v, float widen) {
+    farLimit = v.farZ;
     if (!ready() || !v.valid || !extraCount) return;
     // the extra polygons are not in the game's order: they get a depth buffer among themselves
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -398,6 +417,7 @@ void NativeWorld::drawExtras(const NativeView& v, float widen) {
 }
 
 void NativeWorld::drawRun(const NativeView& v, const std::vector<uint32_t>& polygons, float widen) {
+    farLimit = 1e9f;
     if (!ready() || !v.valid || polygons.empty()) return;
     // The scenery polygons in the order the game drew them (its painter's algorithm: no depth buffer, a nearer polygon can be drawn first and be covered by a farther one).
     runIndex.clear();

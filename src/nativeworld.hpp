@@ -24,6 +24,7 @@ struct NativeView {
     float rot[9] = {4096, 0, 0, 0, 4096, 0, 0, 0, 4096};   // the camera matrix as the GTE holds it (row-major, 4096 = 1.0)
     float h = 288;              // GTE projection plane distance
     float ofx = 256, ofy = 120; // screen centre in VRAM pixels (the GTE's offset plus the GPU draw offset)
+    float farZ = 1e9f;          // the farthest depth worth drawing (the game's own draw distance)
     bool valid = false;
 };
 
@@ -46,11 +47,9 @@ public:
     // different for every pass, `frameId` for every picture.
     static constexpr uint32_t kNoPolygon = 0xFFFFFFFFu;
     uint32_t claim(const uint64_t keys[3], bool seeThrough, uint32_t frameId, uint32_t passId);
-    // Call first for every triangle of a pass: polygons the game draws see-through are noted (before any claim, so that the answer does not depend on the order).
-    void markSeeThrough(const uint64_t keys[3], bool seeThrough, uint32_t frameId);
     // After the claims of a pass. With `extend` (a widened picture) the polygons of the sections the game drew from that it did not draw are prepared, so that the margins the
     // game's 4:3 view culled are not empty. Needs the GL context.
-    void commit(uint32_t frameId, bool extend);
+    void commit(uint32_t frameId, bool extend, const float cam[3], float farZ);
     // Under the picture: the polygons the game did not draw (see commit), with a depth buffer of their own.
     void drawExtras(const NativeView& view, float widen = 1.0f);
     // The scenery polygons in the order the game drew them, with no depth test: the game's painter's algorithm lets a polygon that is nearer be covered by one that is farther.
@@ -59,7 +58,7 @@ public:
 private:
     uint32_t levelId = 0xFFFFFFFFu;
     GLuint program = 0, vao = 0, vbo = 0, ebo = 0, runEbo = 0, pageTex = 0;
-    GLint locRot = -1, locCam = -1, locH = -1, locOfs = -1, locPages = -1, locDepth = -1, locWiden = -1, locMinZ = -1, locCull = -1;
+    GLint locRot = -1, locCam = -1, locH = -1, locOfs = -1, locPages = -1, locDepth = -1, locWiden = -1, locMinZ = -1, locMaxZ = -1, locCull = -1;
     size_t triangleCount = 0;
     std::unordered_set<uint64_t> lookup;                   // the world positions (worldKey) of the level's vertices
     std::unordered_multimap<uint64_t, uint32_t> triples;   // three vertex numbers (sorted) of a polygon -> the polygon
@@ -68,10 +67,11 @@ private:
     std::vector<uint32_t> polyPass;                        // the pass that last took the polygon
     std::vector<uint32_t> polyFirst, polyStamp;            // per polygon: its first triangle (a quad has two), the last frame it was claimed in
     std::vector<uint8_t> polyTris;
-    std::vector<uint32_t> polySeeThrough;                   // the last frame the game drew the polygon see-through in (0 = never)
+    std::vector<uint8_t> polySemi;                          // per polygon: drawn see-through by the game (textured with a blend mode)
     std::vector<uint32_t> polySection, polyClass;           // per polygon: its section, and its texture (polygons of a see-through texture are the game's to draw)
-    std::unordered_set<uint32_t> seeThroughClasses;
     uint32_t sectionCount = 0;
+    std::vector<std::array<float, 6>> sectionBox;           // per section: min x y z, max x y z in game units
+    float farLimit = 1e9f;
     size_t statClaims = 0, statMiss = 0, statMulti = 0, statSemi = 0;   // debugging counters (CB2_NWLOG)
     int lastCam[3] = {0, 0, 0};
     bool haveCam = false;

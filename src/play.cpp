@@ -814,6 +814,7 @@ int main(int argc, char** argv) {
                 float camGame[3];
                 for (int k = 0; k < 3; ++k) camGame[k] = float(int32_t(p.peek32(0x80060768u + 4u * uint32_t(k))));
                 std::vector<std::array<int, 3>> vs;
+                float runFar = 0;
                 std::vector<std::array<float, 2>> runPts;
                 const r3000::GteSample* first = nullptr;
                 auto flushRun = [&] {
@@ -833,9 +834,11 @@ int main(int argc, char** argv) {
                         nwNewest.h = float(first->h);
                         nwOfs[0] = float(first->ofx >> 16);
                         nwOfs[1] = float(first->ofy >> 16);
+                        nwNewest.farZ = std::max(4000.0f, runFar * 1.15f);
                         nwNewest.valid = true;
                     }
                     vs.clear();
+                    runFar = 0;
                     runPts.clear();
                     first = nullptr;
                 };
@@ -845,6 +848,7 @@ int main(int argc, char** argv) {
                     if (first && std::memcmp(first->rt, s.rt, sizeof s.rt) != 0) flushRun();
                     if (!first) first = &s;
                     vs.push_back({s.vx, s.vy, s.vz});
+                    runFar = std::max(runFar, s.sz);
                     runPts.push_back({s.sx, s.sy});
                 }
                 flushRun();
@@ -856,7 +860,6 @@ int main(int argc, char** argv) {
                 std::vector<psx::Gpu::WorldPoint> all;
                 for (const auto& v : nwPoints) all.insert(all.end(), v.begin(), v.end());
                 std::array<int, 2> off = nwDrawOff;
-                p.gpu.tagWorld(all, [&](const uint64_t* ids, psx::GpuCmd& c) { nativeWorld.markSeeThrough(ids, c.semi, frameId); return false; });
                 static uint32_t nwPass = 0;
                 ++nwPass;
                 if (p.gpu.tagWorld(all, [&](const uint64_t* ids, psx::GpuCmd& c) {
@@ -865,7 +868,7 @@ int main(int argc, char** argv) {
                         // the game's own scenery polygons are not drawn at all: what it made up (split near polygons) is replaced by the whole level polygons, and only the see-through ones stay
                         return poly != cb2::NativeWorld::kNoPolygon || !c.semi;
                     }, &off)) nwDrawOff = off;
-                nativeWorld.commit(frameId, true);
+                nativeWorld.commit(frameId, true, nwNewest.cam, nwNewest.farZ);
                 nwNewest.ofx = nwOfs[0];
                 nwNewest.ofy = nwOfs[1];
             }
