@@ -163,7 +163,7 @@ if(WIN32)
   target_include_directories(cb2_game PRIVATE third_party assets "${CMAKE_BINARY_DIR}/gen")
   target_link_libraries(cb2_game PRIVATE cb2 glad glfw)
   target_compile_definitions(cb2_game PRIVATE ${CB2_DEFAULT_DEFS})
-  set_target_properties(cb2_game PROPERTIES LINK_FLAGS "/ENTRY:mainCRTStartup")
+  set_target_properties(cb2_game PROPERTIES LINK_FLAGS "/ENTRY:mainCRTStartup /MAP")   # the link map lets tools/resolve_crash.py turn the addresses of a crash report into function names
 endif()
 add_executable(cb2_pack src/pack_tool.cpp)
 target_link_libraries(cb2_pack PRIVATE cb2)

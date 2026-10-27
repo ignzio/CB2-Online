@@ -25,6 +25,15 @@ $pack = Join-Path $out "CB2-Online-$tag"
 New-Item -ItemType Directory -Force (Join-Path $pack "data") | Out-Null
 Copy-Item $player (Join-Path $out "Crash2.exe")
 Copy-Item $server (Join-Path $out "Crash2-Server.exe")
+# The linker's map of this exact build turns the addresses of a crash report into function names (tools\resolve_crash.py, docs\CRASHES.md). It is attached to the release
+# and kept here in dist\symbols\<tag>\ (the build of a release cannot be reproduced bit for bit later, so this is the only copy that matches).
+$map = Join-Path $root "build\Release\cb2_game.map"
+if (Test-Path $map) {
+    $sym = Join-Path $root "dist\symbols\$tag"
+    New-Item -ItemType Directory -Force $sym | Out-Null
+    Copy-Item $map (Join-Path $sym "Crash2.map") -Force
+    Copy-Item $map (Join-Path $out "Crash2-$tag.map")
+} else { Write-Warning "build\Release\cb2_game.map not found: this release has no symbols for crash reports" }
 
 # ---- code signing (optional but recommended: unsigned programs are what Windows Defender / SmartScreen warn about) -------------------------------------------------------------
 # Configure ONE of these in the environment (nothing secret is ever stored in the repository):

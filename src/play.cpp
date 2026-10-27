@@ -8,6 +8,14 @@
 #include <cstdint>
 #include <cstdio>
 #include <deque>
+#include <new>
+#include <stdexcept>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <intrin.h>
+#endif
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -138,6 +146,7 @@ int main(int argc, char** argv) {
     const std::string exeDir = psx::selfPath().empty() ? std::filesystem::path(argv[0]).parent_path().string()
                                                        : std::filesystem::path(psx::selfPath()).parent_path().string();
     cb2crash::install(exeDir, CB2_VERSION);
+    std::set_new_handler([] { cb2crash::log("out of memory (a memory allocation failed)"); throw std::bad_alloc(); });
     cfg.load(exeDir);
     int first = 1;
     std::string loadStatePath, saveStatePath;   // --load-state file, --save-state-at FRAME:file
@@ -364,6 +373,7 @@ int main(int argc, char** argv) {
         else std::fprintf(stderr, "no translated engine code linked in (run tools/recomp.py); using the interpreter\n");
     }
 
+    glfwSetErrorCallback([](int code, const char* text) { cb2crash::log("GLFW error %d: %s", code, text ? text : "?"); });
     if (!glfwInit()) { psx::showError("cannot initialise the window system"); return 1; }
 #ifdef _WIN32
     timeBeginPeriod(1);
@@ -380,6 +390,7 @@ int main(int argc, char** argv) {
     if (!gladLoadGL(glfwGetProcAddress)) return 1;
     // Crash reports: what the graphics driver is, and (for a player's session, not a test) whether the last session failed and the lock file that shows the next one if this one vanishes.
     std::snprintf(cb2crash::live.renderer, sizeof cb2crash::live.renderer, "%s / %s", reinterpret_cast<const char*>(glGetString(GL_RENDERER)), reinterpret_cast<const char*>(glGetString(GL_VERSION)));
+    cb2crash::log("graphics: %s; release %s; window %dx%d", cb2crash::live.renderer, release.id, windowW, windowH);
     const bool interactiveSession = !hidden && captureFrame == 0 && menuScript.empty();
     struct SessionGuard { bool on; ~SessionGuard() { if (on) cb2crash::sessionEnd(); } } sessionGuard{interactiveSession};
     if (interactiveSession) {
@@ -388,6 +399,7 @@ int main(int argc, char** argv) {
             cb2crash::ask("Crash Bandicoot 2", "The game closed unexpectedly last time.\n\nOpen a bug report in your browser? The page opens with the details filled in; nothing is sent until you press Submit.")) {
             std::snprintf(cb2crash::live.phase, sizeof cb2crash::live.phase, "reporting");
             cb2crash::openIssue(CB2_UPDATE_REPO, "The game closed unexpectedly", cb2crash::reportText(lastFailure));
+            cb2crash::showCrashFiles();   // the folder with crash-last.log, the session log and the dump: the report asks for them
         }
         cb2crash::sessionStart();
     }
@@ -736,6 +748,7 @@ int main(int argc, char** argv) {
             for (FakeRequest& fr : fakeRequests) fr.frame += p.frames;
         }
     }
+    if (interactiveSession) cb2crash::watchMainThread();
     while (!glfwWindowShouldClose(win) && !quitRequested) {
         {   // what a crash report should say about the game's state
             static double lastLive = 0;
@@ -743,14 +756,35 @@ int main(int argc, char** argv) {
             cb2crash::live.level = p.peek32(cb2game::current().currentLevel) & 0xFFu;
             cb2crash::live.guestPc = p.cpu.pc;
             cb2crash::setPhase(menu.isOpen() ? "menu" : "playing");
-            static const uint64_t testCrash = std::getenv("CB2_TESTCRASH") ? std::strtoull(std::getenv("CB2_TESTCRASH"), nullptr, 10) : 0;   // tool: crash on purpose at this frame (tries the crash report)
-            if (testCrash && p.frames >= testCrash) *static_cast<volatile int*>(nullptr) = 1;
+            cb2crash::beat();
+            {   // events worth knowing when something goes wrong later
+                static uint32_t lastLevelLogged = 0xFFFFFFFFu;
+                static int lastPuppets = -1;
+                if (cb2crash::live.level.load() != lastLevelLogged) { lastLevelLogged = cb2crash::live.level.load(); cb2crash::log("level %02X (frame %llu)", lastLevelLogged, (unsigned long long)p.frames); }
+                if (mp.active() && mp.puppetCount() != lastPuppets) { lastPuppets = mp.puppetCount(); cb2crash::log("online: %d other player(s) in this level (room %s)", lastPuppets, online.room.c_str()); }
+            }
+            // tool: CB2_TESTCRASH=frame[:kind] crashes on purpose at that frame (kind: null (default), throw, abort, fastfail, exit, hang, oom): tries the crash report, the logs and the dump
+            static const char* testCrashEnv = std::getenv("CB2_TESTCRASH");
+            static const uint64_t testCrash = testCrashEnv ? std::strtoull(testCrashEnv, nullptr, 10) : 0;
+            if (testCrash && p.frames >= testCrash) {
+                const char* kind = testCrashEnv ? std::strchr(testCrashEnv, ':') : nullptr;
+                kind = kind ? kind + 1 : "null";
+                cb2crash::log("CB2_TESTCRASH: %s at frame %llu", kind, (unsigned long long)p.frames);
+                if (!std::strcmp(kind, "throw")) throw std::runtime_error("test exception");
+                if (!std::strcmp(kind, "abort")) std::abort();
+                if (!std::strcmp(kind, "fastfail")) __fastfail(7);
+                if (!std::strcmp(kind, "exit")) ExitProcess(5);
+                if (!std::strcmp(kind, "hang")) { for (;;) Sleep(100); }
+                if (!std::strcmp(kind, "oom")) { for (;;) { new char[1u << 30]; } }
+                *static_cast<volatile int*>(nullptr) = 1;
+            }
             const double nowLive = glfwGetTime();
             if (nowLive - lastLive > 1.0) {
                 lastLive = nowLive;
                 std::snprintf(cb2crash::live.settings, sizeof cb2crash::live.settings, "scale %d, smooth %d, widescreen %d, perspective %d, native world %d, textures %d, vsync %d, filter %d, native code %d", hiresScale, settings.smooth, settings.widescreen,
                               settings.perspective, settings.nativeWorld, settings.textures, settings.vsync, settings.filter, int(p.nativeEnabled()));
                 cb2crash::heartbeat();
+                cb2crash::status();
             }
         }
         if (frameLog) {

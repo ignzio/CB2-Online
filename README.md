@@ -48,7 +48,7 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 
 **Bug reports**
 - Esc → **Report a bug** opens a GitHub issue in your browser with your version, system, graphics card, settings and the last crash filled in. Nothing is sent until you press Submit.
-- If the game crashes it writes `crash.log` next to the game (what failed, where, the game's state). If it vanishes without an error (killed, graphics driver reset) the next start notices that too. Either way, the next start offers to open the bug report for you; the log is kept as `crash-last.log`.
+- If the game crashes it writes `crash.log` and a minidump `crash.dmp` next to the game (what failed, where, the loaded modules, the last events), and every session keeps an event log, `cb2-session.log`, that survives a killed process; a game that stops responding is recorded too (`hang.dmp`). If it vanishes without an error (killed, graphics driver reset) the next start notices that as well. Either way, the next start offers to open the bug report for you and shows the crash files; each release has a link map that turns the addresses into function names. See [docs/CRASHES.md](docs/CRASHES.md).
 
 **Controls**
 - Keyboard, game pad (XInput / SDL mapping) and mouse; every PS1 button is **rebindable** for both keyboard and pad, side by side in the menu.
