@@ -29,6 +29,7 @@
 #include "relaunch.hpp"
 #include "updater.hpp"
 #include "discimport.hpp"
+#include "setup.hpp"
 #include "savestate.hpp"
 #include "hud.hpp"
 #include "interp.hpp"
@@ -171,6 +172,8 @@ int main(int argc, char** argv) {
     online.rendezvous = cfg.rendezvous;
     online.directory = cfg.directory;
     bool noLobby = false, forceLobby = false;   // --no-lobby skips the lobby screen; --lobby shows it even with --hidden (tests)
+    bool setupRequested = false, setupOnly = false;   // --setup: the in-game first-run screen (choose the release, pick the disc image) even when the game files exist; --setup-only quits after it
+    cb2setup::Script setupScript;                     // --setup-script / --setup-shot: scripted for tests
     cb2lobby::Script lobbyScript;               // --lobby-script up,down,enter,... and --lobby-shot prefix: scripted lobby for tests
     uint64_t captureAfterPuppet = 0, puppetSince = 0;
     uint64_t menuAt = 0;                        // --menu-at F / --menu-script open,down,...: scripted input for the in-game menu (tests)
@@ -246,6 +249,19 @@ int main(int argc, char** argv) {
             }
         }
         else if (!std::strcmp(argv[i], "--lobby")) forceLobby = true;
+        else if (!std::strcmp(argv[i], "--setup")) setupRequested = true;
+        else if (!std::strcmp(argv[i], "--setup-only")) setupRequested = setupOnly = true;
+        else if (!std::strcmp(argv[i], "--setup-shot") && more) setupScript.shotPrefix = argv[++i];
+        else if (!std::strcmp(argv[i], "--setup-script") && more) {
+            const std::string s = argv[++i];
+            for (size_t pos = 0; pos <= s.size();) {
+                const size_t comma = s.find(',', pos);
+                const std::string tok = s.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+                if (!tok.empty()) setupScript.tokens.push_back(tok);
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
+            }
+        }
         else if (!std::strcmp(argv[i], "--lobby-shot") && more) lobbyScript.shotPrefix = argv[++i];
         else if (!std::strcmp(argv[i], "--lobby-script") && more) {
             const std::string s = argv[++i];
@@ -285,26 +301,30 @@ int main(int argc, char** argv) {
     if (!bundled) {
         // First run: the game files are not here. Copy them out of the player's own disc image.
         std::string err = cfg.validate();
-        const bool wantImport = !importImage.empty() || (!err.empty() && !hidden);
+        const bool wantImport = !importImage.empty() || setupRequested || (!err.empty() && !hidden);
         if (wantImport) {
             const std::string dataDir = (std::filesystem::path(exeDir) / cb2game::ntsc().folderName).string(), dataDirPal = (std::filesystem::path(exeDir) / cb2game::pal().folderName).string();
-            if (importImage.empty() && cb2import::ask("The game files were not found.\n\nThis program does not include the game. Choose your own Crash Bandicoot 2 disc image - the European (PAL) or the American (NTSC-U) one "
-                                                      "(.cue/.bin or .iso) - and the files will be copied for you, once.\n\nPress OK to choose the disc image."))
-                importImage = cb2import::pickImage(exeDir);
-            if (!importImage.empty()) {
-                const cb2import::Result r = cb2import::importDisc(importImage, dataDir, {}, dataDirPal);
-                if (r.ok) {
-                    const bool isPal = r.profile->region == cb2game::Region::Pal;
-                    cfg.remember(exeDir, isPal ? "game_pal" : "game", r.profile->folderName);
-                    (isPal ? cfg.gamePal : cfg.game) = r.folder;
-                    cfg.resolvePaths(exeDir);
-                    err = cfg.validate();
-                    if (err.empty() && !hidden) cb2import::inform("Done: " + std::to_string(r.files) + " files of the " + r.profile->title + " release were copied to\n" + r.folder + "\n\nThe game starts now. You do not need the disc image any more.");
-                } else {
+            cb2import::Result r;   // what was just copied, if anything
+            if (importImage.empty()) {
+                // the game's own screens: which release the player has, then the disc image (browsed inside the window or dropped on it)
+                const cb2setup::Result s = cb2setup::run(exeDir, !err.empty(), hidden, setupScript);
+                if (s.imported) { r.ok = true; r.profile = s.profile; r.folder = s.folder; }
+                else if (!err.empty() || setupOnly) return 0;   // nothing to play without game files: the player closed the setup
+            } else {
+                r = cb2import::importDisc(importImage, dataDir, {}, dataDirPal);
+                if (!r.ok) {
                     psx::showError("The game files could not be imported: " + r.error);
                     return 2;
                 }
             }
+            if (r.ok) {
+                const bool isPal = r.profile->region == cb2game::Region::Pal;
+                cfg.remember(exeDir, isPal ? "game_pal" : "game", r.profile->folderName);
+                (isPal ? cfg.gamePal : cfg.game) = r.folder;
+                cfg.resolvePaths(exeDir);
+                err = cfg.validate();
+            }
+            if (setupOnly) return 0;
         }
         if (!err.empty()) {
             const std::string usage = err + "\nusage: cb2_play [game folder] [--game <folder>] [--mod <folder>]... [--card file.mcr] [--ram-mb 2..16] [--scale 1..8] [--native]";

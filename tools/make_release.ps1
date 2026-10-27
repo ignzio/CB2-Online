@@ -73,6 +73,7 @@ Set-Content (Join-Path $pack "data\GAME FILES GO HERE.txt") -Encoding ascii -Val
 CB2-Online does not include the game. Start Play.bat: the first time, it asks for your own Crash Bandicoot 2 disc image, European (PAL) or
 American (NTSC-U) (.cue/.bin or .iso), and copies the files it needs into the data-pal (European) or data (American) folder.
 Or copy SCES_009.67 (European) or SCUS_941.54 (American), SYSTEM.CNF and the S0..S3 folders there yourself.
+The game first asks which release you have (it plays and meets players online with that release only); Add another release.bat adds the other one later.
 "@
 Set-Content (Join-Path $pack "cb2.cfg") -Encoding ascii -Value @"
 # CB2-Online settings. Command-line options override these.
@@ -84,6 +85,7 @@ scale = 4
 function Bat($name, $lines) { Set-Content (Join-Path $pack $name) -Value (@("@echo off", 'cd /d "%~dp0"') + $lines) -Encoding ascii }
 Bat "Play.bat" @('start "" "Crash2.exe"')
 Bat "Play offline (no lobby).bat" @('start "" "Crash2.exe" --no-lobby')
+Bat "Add another release.bat" @('start "" "Crash2.exe" --setup')
 Bat "Start rendezvous server.bat" @('echo Players put this machine address as rendezvous in cb2.cfg (or in the lobby). Close this window to stop the server.', '"Crash2 Server.exe"', 'pause')
 $zip = Join-Path $out "CB2-Online-$tag.zip"
 Compress-Archive -Path $pack -DestinationPath $zip -Force

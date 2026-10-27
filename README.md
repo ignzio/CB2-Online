@@ -69,8 +69,10 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 
 1. Download `CB2-Online-v<version>.zip` from the [Releases](../../releases) page and unzip it anywhere.
 2. Run `Play.bat` (or `Crash2.exe`).
-3. **First start only:** the game asks for your disc image. Pick the `.cue` (or `.bin` / `.iso`) of your Crash Bandicoot 2 disc, European or American; it copies the
-   files it needs into the `data-pal` (European) or `data` (American) folder, once. You can import the second release later with `--import`. You can also drop the `.cue` / `.iso` on `Crash2.exe`, or run `Crash2.exe --import "path\to\disc.cue"`.
+3. **First start only:** the game's own setup screen asks **which release you have** - European (PAL) or American (NTSC-U) - and explains what that means: you play, and meet other players online,
+   with that release only (the two are kept apart: their rooms, saves, records and save states do not mix). Then the usual Windows file window opens on top of the game: pick the `.cue`
+   (or `.bin` / `.iso`) of that disc. The game checks that the disc really is the release you chose, copies the files it needs into `data-pal` (European) or `data` (American) with a progress bar, once, and starts.
+   To add the other release later, start `Add another release.bat` (or `Crash2.exe --setup`). You can also drop the `.cue` / `.iso` on `Crash2.exe` (or on the setup window), or run `Crash2.exe --import "path\to\disc.cue"`, which detects the release by itself.
    Compressed formats (`.chd`, `.pbp`, `.ecm`) are not supported. If you already have the files extracted, copy `SCES_009.67` (European) or `SCUS_941.54` (American), `SYSTEM.CNF` and the
    `S0` .. `S3` folders into `data-pal` or `data` yourself.
 4. The lobby opens. Choose **Play Online**, or **Play Offline** to play alone.
@@ -88,7 +90,7 @@ states\               your save states
 cb2.cfg               settings (name, room, server, picture ...)
 memcard0.mcr          your game saves; records.txt: your level records
 Crash2-Server.exe     rendezvous server (no game inside), only needed to host one
-*.bat                 shortcuts: play, play offline (no lobby), start the server
+*.bat                 shortcuts: play, play offline (no lobby), add another release, start the server
 ```
 
 ## Playing online

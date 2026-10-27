@@ -29,10 +29,12 @@ bool looksLikeImage(const std::string& path);
 // `outDirPal` when the disc is the European release and that folder is given - (created if needed). A .cue file is followed
 // to its first data file. Existing files in outDir are replaced; files are written under a temporary name first, so a failed import
 // never leaves half a file behind under its real name.
-Result importDisc(const std::string& imagePath, const std::string& outDir, const Progress& progress = {}, const std::string& outDirPal = {});
+// `expect` (optional): the release the player said the disc is; a disc of the other release is refused before anything is copied.
+Result importDisc(const std::string& imagePath, const std::string& outDir, const Progress& progress = {}, const std::string& outDirPal = {}, const cb2game::Profile* expect = nullptr);
 
-// Windows: the "open file" dialog for the disc image, starting in `startDir`. Empty when cancelled (or on other systems).
-std::string pickImage(const std::string& startDir);
+// Windows: the "open file" dialog for the disc image, starting in `startDir`, on top of the window `ownerWindow` (an HWND, may be null) with the given title.
+// Empty when cancelled (or on other systems).
+std::string pickImage(const std::string& startDir, void* ownerWindow = nullptr, const std::string& title = {});
 
 // Windows message boxes for the steps around the import (no console in the packaged build). ask: OK / Cancel, true for OK.
 bool ask(const std::string& text);

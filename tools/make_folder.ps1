@@ -52,5 +52,6 @@ scale = 4
 function Bat($name, $lines) { Set-Content (Join-Path $out $name) -Value (@("@echo off", 'cd /d "%~dp0"') + $lines) -Encoding ascii }
 Bat "Play.bat" @('start "" "Crash2.exe"')
 Bat "Play offline (no lobby).bat" @('start "" "Crash2.exe" --no-lobby')
+Bat "Add another release.bat" @('start "" "Crash2.exe" --setup')
 Bat "Start rendezvous server.bat" @('echo Players put this machine address as rendezvous in cb2.cfg (or in the lobby). Close this window to stop the server.', '"Crash2 Server.exe"', 'pause')
 "Game folder ready: $out"

@@ -145,7 +145,7 @@ bool looksLikeImage(const std::string& path) {
     return e == ".CUE" || e == ".BIN" || e == ".ISO" || e == ".IMG";
 }
 
-Result importDisc(const std::string& imagePath, const std::string& outDirNtsc, const Progress& progress, const std::string& outDirPal) {
+Result importDisc(const std::string& imagePath, const std::string& outDirNtsc, const Progress& progress, const std::string& outDirPal, const cb2game::Profile* expect) {
     Result r;
     std::string path = imagePath;
     if (extensionOf(path) == ".CUE") {
@@ -182,6 +182,11 @@ Result importDisc(const std::string& imagePath, const std::string& outDirNtsc, c
     }
     if (!haveNtscExe && !havePalExe) { r.error = "this is not Crash Bandicoot 2 (NTSC-U SCUS-94154 or PAL SCES-00967): neither SCUS_941.54 nor SCES_009.67 is on the disc"; return r; }
     r.profile = havePalExe ? &cb2game::pal() : &cb2game::ntsc();
+    if (expect && r.profile != expect) {
+        r.error = std::string("this disc is the ") + (havePalExe ? "EUROPEAN (PAL)" : "AMERICAN (NTSC-U)") + " release, but you chose the " + (expect == &cb2game::pal() ? "EUROPEAN (PAL)" : "AMERICAN (NTSC-U)") +
+                  " one. Go back and choose the other release, or pick the other disc image.";
+        return r;
+    }
     const std::string outDir = (havePalExe && !outDirPal.empty()) ? outDirPal : outDirNtsc;
     r.folder = outDir;
     int levelFiles = 0;
@@ -240,22 +245,24 @@ void inform(const std::string& text) {
 #endif
 }
 
-std::string pickImage(const std::string& startDir) {
+std::string pickImage(const std::string& startDir, void* ownerWindow, const std::string& title) {
 #ifdef _WIN32
     wchar_t file[MAX_PATH * 2] = {};
     const std::wstring dir = fs::u8path(startDir).wstring();
     OPENFILENAMEW ofn{};
     ofn.lStructSize = sizeof ofn;
+    ofn.hwndOwner = static_cast<HWND>(ownerWindow);
+    const std::wstring wtitle = title.empty() ? std::wstring(L"Choose your Crash Bandicoot 2 disc image") : fs::u8path(title).wstring();
     ofn.lpstrFilter = L"Disc images (*.cue;*.bin;*.iso;*.img)\0*.cue;*.bin;*.iso;*.img\0All files\0*.*\0";
     ofn.lpstrFile = file;
     ofn.nMaxFile = DWORD(std::size(file));
     ofn.lpstrInitialDir = dir.empty() ? nullptr : dir.c_str();
-    ofn.lpstrTitle = L"Choose your Crash Bandicoot 2 disc image";
+    ofn.lpstrTitle = wtitle.c_str();
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
     if (!GetOpenFileNameW(&ofn)) return {};
     return fs::path(file).u8string();
 #else
-    (void)startDir;
+    (void)startDir; (void)ownerWindow; (void)title;
     return {};
 #endif
 }
