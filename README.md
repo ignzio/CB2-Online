@@ -189,6 +189,10 @@ Everything in the menu is remembered in `cb2.cfg` next to `Crash2.exe`; the file
 
 The full list is documented at the top of [src/config.hpp](src/config.hpp) and in `cb2.cfg.example`.
 
+## Players cannot see each other?
+
+Usually an antivirus or firewall (Kaspersky in particular) blocks `Crash2.exe` from the network. The waiting room then shows a red notice after about ten seconds. Allow the program in the firewall's application rules and add it to the exclusions: step by step in [docs/ONLINE.md](docs/ONLINE.md#if-players-cannot-see-each-other-antivirus-and-firewalls) and the FAQ of the project page.
+
 ## Updates
 
 When the lobby opens, the game checks this project's GitHub Releases for a newer version (one request, in the background). If there is one, the first row

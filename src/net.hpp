@@ -56,6 +56,9 @@ public:
     uint32_t id() const { return uid; }
     bool directoryReachable() const { return directoryClient.reachable(); }
     bool directoryEnabled() const { return directoryClient.active(); }
+    // True when, some seconds after the start, nothing at all has come back over UDP: no answer from the STUN server, the rendezvous server or any player. That is what a firewall or an
+    // antivirus that blocks the program (Kaspersky, ...) looks like from inside, so the waiting room says so.
+    bool udpSilent(double afterSeconds = 8.0) const { return sinceStart >= 0 && now - sinceStart > afterSeconds && !pub.valid() && serverState() != 2 && peers.empty(); }
     void addSeed(const Endpoint& e);   // start talking to a player we know the public address of
     // Everybody else, newest known state.
     std::vector<PlayerState> others() const;
@@ -85,7 +88,7 @@ private:
     uint8_t nextId = 1;
     bool noDirect = false;                  // testing (CB2_NODIRECT): pretend no direct packet ever arrives (forces the relay path)
     Endpoint stunServer, pub;
-    double lastStun = -1e9, stunSentAt = 0;
+    double lastStun = -1e9, stunSentAt = 0, sinceStart = -1;   // sinceStart: time of the first update() of this session
     uint8_t stunTx[12] = {};
     DirectoryClient directoryClient;
     bool joinSent = false, wantJoin = false;

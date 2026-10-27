@@ -483,7 +483,12 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                 y += 30;
             }
             if (shown == 0) canvas.text("WAITING FOR OTHERS...", 150, y + 6, 20, kDim, false);
-            canvas.centred("NO HOST - LEAVE AND COME BACK ANY TIME", 410, 17, kDim);
+            if (!localMode && net.udpSilent()) {   // nothing has come back over the internet: a firewall or antivirus is the usual reason
+                canvas.centred("NO ANSWER FROM THE INTERNET - A FIREWALL OR ANTIVIRUS MAY BLOCK CRASH2.EXE", 404, 14, kRed);
+                canvas.centred("ALLOW IT (KASPERSKY: PROTECTION - FIREWALL - APPLICATION RULES). SEE THE FAQ ON THE WEBSITE", 422, 13, kRed);
+            } else {
+                canvas.centred("NO HOST - LEAVE AND COME BACK ANY TIME", 410, 17, kDim);
+            }
             canvas.centred("ENTER  START THE GAME      ESC  BACK", 446, 18, kDim);
         }
         canvas.flush();

@@ -152,6 +152,7 @@ bool Session::start(const SessionOptions& options, std::string& error) {
     peers.clear();
     now = 0;
     lastSend = lastRegister = lastLan = lastServerAnswer = lastResolve = -1e9;
+    sinceStart = -1;
     nextId = 1;
     local = PlayerState{};
     std::strncpy(local.name, playerName.c_str(), kNameLength - 1);
@@ -338,6 +339,7 @@ void Session::receive() {
 void Session::update(double t) {
     if (!active()) return;
     now = t;
+    if (sinceStart < 0) sinceStart = t;
     receive();
     for (auto it = peers.begin(); it != peers.end();)
         it = (now - it->second.lastSeen > kTimeout) ? peers.erase(it) : std::next(it);
@@ -389,7 +391,9 @@ void Session::update(double t) {
         }
     }
     // Same PC / same network: probe the local ports and broadcast; whoever is in our room answers by sending to us.
-    if (!noLan && now - lastLan >= kLanInterval) {
+    // The first seconds probe once a second so that friends on the same PC / network are found at once; afterwards every 4 s: ten ports plus a broadcast every second looks like a
+    // port scan to some security programs (Kaspersky's network attack blocker), which then cut the program off the network.
+    if (!noLan && now - lastLan >= (now - sinceStart < 20.0 ? kLanInterval : 4.0 * kLanInterval)) {
         lastLan = now;
         for (int i = 0; i < kLanPorts; ++i) {
             const uint16_t p = htons(uint16_t(kDefaultPort + i));

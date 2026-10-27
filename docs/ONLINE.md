@@ -46,6 +46,25 @@ or a port forward on a home router (`--public-port` if the outside port differs)
 through their routers (hole punching, with the public address learned from STUN). Pairs that still cannot connect need a relay: a
 `Crash2 Server.exe` whose address is built in as `local/rendezvous.txt` (or `rendezvous =` in `cb2.cfg`) forwards their packets.
 
+## If players cannot see each other (antivirus and firewalls)
+
+The usual reason is a security program that treats `Crash2.exe` as an unknown program and blocks its network traffic; **Kaspersky** does this by default, others can too. Then the player who has it neither
+reaches the servers nor other players, and nobody finds them. The waiting room says so after about ten seconds: *"NO ANSWER FROM THE INTERNET - A FIREWALL OR ANTIVIRUS MAY BLOCK CRASH2.EXE"*.
+
+What to do (the player with the security program):
+
+1. Open Kaspersky, then **Settings** (the gear) > **Protection** > **Firewall** > **Configure application rules**. Find `Crash2.exe` (add it with *Add* if it is not listed) and set it to **Trusted**,
+   or give it a rule that allows UDP in and out.
+2. **Settings** > **Protection** > **Network Attack Blocker**: if it reports an attack from the game or from another player, add them to its exclusions (or switch it off to test).
+3. **Settings** > **Threats and exclusions** > **Manage exclusions**: add the game folder (or `Crash2.exe`), and under **Specify trusted applications** add `Crash2.exe`.
+4. Restart the game. The names of the menus differ a little between Kaspersky versions; other antivirus suites (ESET, Bitdefender, Norton, ...) have the same two things: an application / firewall rule and an exclusion list.
+
+Windows' own firewall asks once the first time ("allow Crash2.exe on private and public networks?"): answer yes. A VPN or a school / office network can block UDP as well; a phone hotspot needs the relay server
+(see above). A server (`Crash2 Server.exe`) needs its UDP port (7777) open and allowed in the same way.
+
+Also: from version 0.8.4 the game probes the local ports only once a second for the first 20 seconds and every 4 seconds afterwards; probing ten ports and a broadcast every second looked like a port scan to some
+network attack blockers. If a program still reports the game as an attack, that is a false positive; tell us which one.
+
 ## How players find each other
 
 1. **Same PC or same network: automatic.** Each copy listens on the first free UDP port from 7777 to 7786 and probes those ports on this
