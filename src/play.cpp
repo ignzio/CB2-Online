@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <deque>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -681,19 +682,40 @@ int main(int argc, char** argv) {
         if (!ok) std::fprintf(stderr, "save state: %s\n", err.c_str());
         return std::make_pair(ok, err);
     };
+    // Freeze watchdog. The engine's page allocator has a hang that only a restart cures: when it finds no free slot for a page of level data it prints "!mem" and tries again
+    // in a loop that nothing can interrupt, so the picture stays black while the window keeps answering. The platform counts those messages; when they have not stopped
+    // for three seconds the game goes back to a snapshot that was taken while it was healthy (every 15 s, the last two are kept) and the player is told. See docs/PERFORMANCE.md.
+    struct Snapshot { std::vector<uint8_t> bytes; uint64_t frame = 0; };
+    struct Watchdog {
+        uint64_t fails = 0, firstFail = 0, lastFail = 0, lastSnap = 0, windowStart = 0;
+        int recoveries = 0;
+        bool told = false;
+        std::deque<Snapshot> snaps;
+    } wd;
+    const bool watchdogOn = !nativeCode && !std::getenv("CB2_NOWATCHDOG");
+    if (watchdogOn) p.addHook(release.allocFail, [&wd](psx::Platform& pl) {
+        if (pl.frames - wd.lastFail > 30) { wd.firstFail = pl.frames; wd.fails = 0; }
+        wd.lastFail = pl.frames;
+        ++wd.fails;
+    });
+    auto afterStateLoad = [&](const std::vector<uint8_t>& extra) {
+        uint32_t lvl = 0xFF;
+        if (extra.size() >= 4) std::memcpy(&lvl, extra.data(), 4);
+        mp.stateLoaded(lvl);
+        tracker.stateLoaded(extra);
+        interp.reset();
+        t0 = glfwGetTime();
+        base = p.frames;
+        suppressPad = true;
+        wd.fails = 0; wd.firstFail = wd.lastFail = 0; wd.lastSnap = p.frames; wd.told = false;
+    };
     auto doLoad = [&](const std::string& path) {
         std::vector<uint8_t> extra;
         std::string err;
         const bool ok = psx::loadState(p, path, extra, err);
         if (ok) {
-            uint32_t lvl = 0xFF;
-            if (extra.size() >= 4) std::memcpy(&lvl, extra.data(), 4);
-            mp.stateLoaded(lvl);
-            tracker.stateLoaded(extra);
-            interp.reset();
-            t0 = glfwGetTime();
-            base = p.frames;
-            suppressPad = true;
+            afterStateLoad(extra);
+            wd.snaps.clear();   // those belong to another timeline
         } else {
             std::fprintf(stderr, "load state: %s\n", err.c_str());
         }
@@ -1016,6 +1038,49 @@ int main(int argc, char** argv) {
         }
         if (!err.empty()) { std::fprintf(stderr, "guest stopped: %s\n", err.c_str()); break; }
 
+        if (watchdogOn) {
+            const bool failing = wd.fails && p.frames - wd.lastFail <= 30;
+            if (std::getenv("CB2_FAKEFREEZE") && p.frames >= std::strtoull(std::getenv("CB2_FAKEFREEZE"), nullptr, 10) && !wd.recoveries) { wd.fails = 1000; wd.firstFail = p.frames - 400; wd.lastFail = p.frames; }   // test: pretend the allocator is stuck
+            if (failing && wd.fails >= 300 && p.frames - wd.firstFail >= 180) {
+                if (p.frames - wd.windowStart > 3600) { wd.windowStart = p.frames; wd.recoveries = 0; }
+                if (!wd.snaps.empty() && wd.recoveries < 3) {
+                    const Snapshot snap = wd.snaps.front();   // the older one: the newer may already have been taken on the way into the trouble
+                    std::vector<uint8_t> extra;
+                    std::string err;
+                    const int puppetsThen = mp.puppetCount();
+                    const uint32_t levelThen = p.peek32(cb2game::current().currentLevel) & 0xFFu;
+                    if (psx::loadStateFromMemory(p, snap.bytes, extra, err)) {
+                        ++wd.recoveries;
+                        afterStateLoad(extra);
+                        wd.snaps.clear();
+                        wd.snaps.push_back(snap);
+                        mp.pauseSpawning(1200);   // if another player's Crash was what the allocator choked on, give the level a moment without it
+                        std::fprintf(stderr, "freeze watchdog: the game was stuck in its page allocator in level %02X with %d other player(s); went back to frame %llu\n", levelThen, puppetsThen, (unsigned long long)snap.frame);
+                        menu.toast("THE GAME FROZE - BACK A FEW SECONDS", glfwGetTime());
+                        cb2crash::setPhase("recovered from a freeze");
+                    } else {
+                        std::fprintf(stderr, "freeze watchdog: cannot go back: %s\n", err.c_str());
+                        wd.fails = 0;
+                    }
+                } else if (!wd.told) {
+                    wd.told = true;
+                    std::fprintf(stderr, "freeze watchdog: the game is stuck in its page allocator (level %02X, %d other player(s)) and there is nothing to go back to\n", p.peek32(cb2game::current().currentLevel) & 0xFFu, mp.puppetCount());
+                    menu.toast("THE GAME FROZE - F9 LOADS A STATE, ESC MENU", glfwGetTime());
+                }
+            } else if (!failing && !menu.isOpen() && p.frames - wd.lastSnap >= 900 && p.frames - wd.lastFail > 600 && (p.peek32(cb2game::current().currentLevel) & 0xFFu) != 0xFFu) {
+                Snapshot snap;
+                std::string err;
+                const double snapStart = glfwGetTime();
+                const bool snapOk = psx::saveStateToMemory(p, tracker.saveExtra(), snap.bytes, err);
+                if (std::getenv("CB2_SNAPLOG")) std::printf("[snapshot] frame %llu: %.1f ms, %zu bytes\n", (unsigned long long)p.frames, (glfwGetTime() - snapStart) * 1000.0, snap.bytes.size());
+                if (snapOk) {
+                    snap.frame = p.frames;
+                    wd.snaps.push_back(std::move(snap));
+                    while (wd.snaps.size() > 2) wd.snaps.pop_front();
+                }
+                wd.lastSnap = p.frames;
+            }
+        }
         if (saveStateFrame && p.frames >= saveStateFrame) {
             const auto r = doSave(saveStatePath);
             std::printf(r.first ? "state saved at frame %llu to %s\n" : "state NOT saved at frame %llu to %s\n", (unsigned long long)p.frames, saveStatePath.c_str());
@@ -1312,6 +1377,15 @@ int main(int argc, char** argv) {
         }
         if (p.frames - lastTitle >= 60) {
             lastTitle = p.frames;
+            if (std::getenv("CB2_PAGEREFS")) {   // tool: the engine's page table (one slot per 64 KB page of level data) and how many objects hold each page; a leak shows as numbers that only grow
+                const uint32_t table = release.pageTable;
+                const uint32_t n = p.peek32(table);
+                std::printf("[pages] frame %llu level %02x: %u slots, refs:", (unsigned long long)p.frames, p.peek32(cb2game::current().currentLevel) & 0xFFu, n);
+                uint32_t sum = 0;
+                for (uint32_t i = 0; i < n && i < 64; ++i) { const uint32_t r = p.peek32(table + 4 + 0x2Cu * i + 0xC) >> 24; sum += r; std::printf(" %u", r); }
+                std::printf(" (sum %u)\n", sum);
+                std::fflush(stdout);
+            }
             static const bool perf = std::getenv("CB2_PERF") != nullptr;
             static uint64_t perfFrames = p.frames;
             static double perfRun = 0, perfRender = 0, perfSwap = 0, perfWall = glfwGetTime();
@@ -1326,6 +1400,14 @@ int main(int argc, char** argv) {
                     for (auto& [pc, n] : *pcHistMap) { top.push_back({n, pc}); all += n; }
                     std::sort(top.rbegin(), top.rend());
                     for (size_t i = 0; i < top.size() && i < 24; ++i) std::printf("[pc] %08x %5.1f%%\n", top[i].second, 100.0 * double(top[i].first) / double(all));
+                    {   // the same by 0x100-byte block: where the time goes when the loop is long
+                        std::map<uint32_t, uint64_t> blocks;
+                        for (auto& [pc, n] : *pcHistMap) blocks[pc & ~0xFFu] += n;
+                        std::vector<std::pair<uint64_t, uint32_t>> bt;
+                        for (auto& [b, n] : blocks) bt.push_back({n, b});
+                        std::sort(bt.rbegin(), bt.rend());
+                        for (size_t i = 0; i < bt.size() && i < 12; ++i) std::printf("[pc-block] %08x %5.1f%%\n", bt[i].second, 100.0 * double(bt[i].first) / double(all));
+                    }
                     pcHistMap->clear();
                 }
                 std::fflush(stdout);

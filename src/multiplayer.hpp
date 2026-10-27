@@ -48,6 +48,8 @@ public:
     void tick();                                               // networking; call every vertical blank
     std::vector<cb2net::PlayerState> others();                 // remote players (or the test ghost)
     int puppetCount() const { return int(puppets.size()); }
+    // Do not create other players' Crashes for this many frames (after the game was rolled back from a freeze that happened while some were there).
+    void pauseSpawning(uint64_t frames) { disabledUntil = std::max(disabledUntil, p.frames + frames); }
     uint32_t levelId() const { return level; }
     void setTracker(const cb2run::Tracker* t) { runs = t; }   // the speedrun data that is sent along with the player's state
     uint8_t runCounter = 0;                                   // goes up when a run ends

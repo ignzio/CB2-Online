@@ -15,6 +15,10 @@ namespace psx {
 bool saveState(Platform& p, const std::string& path, const std::vector<uint8_t>& extra, std::string& error);
 bool loadState(Platform& p, const std::string& path, std::vector<uint8_t>& extra, std::string& error);
 
+// The same state kept in memory (the freeze watchdog takes one every few seconds and goes back to it when the game hangs).
+bool saveStateToMemory(Platform& p, const std::vector<uint8_t>& extra, std::vector<uint8_t>& out, std::string& error);
+bool loadStateFromMemory(Platform& p, const std::vector<uint8_t>& state, std::vector<uint8_t>& extra, std::string& error);
+
 // A hash over everything a state contains. Two consoles with the same digest are in the same state (used by the determinism test).
 uint64_t stateDigest(Platform& p);
 

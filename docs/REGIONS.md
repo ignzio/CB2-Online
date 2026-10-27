@@ -26,6 +26,12 @@ The first start shows the game's own setup screen (`src/setup.cpp`): *which rele
 
 Save states record the release they were made on and refuse to load on the other one.
 
+## Language warp rooms
+
+The European release has four more level files than the American one: levels 0x2D-0x30 are copies of the warp room (0x02, the same 13.7 MB) with the signs in French, German, Spanish and Italian;
+which one the game loads depends on the language that was chosen. Two European players who chose different languages are therefore in the same room with different level numbers.
+`cb2game::canonicalLevel` (`src/game_profile.hpp`) maps them all to 0x02 for everything that compares players' levels (who sees whom, the player list), on the sending and on the receiving side.
+
 ## What differs in practice
 
 - **Speed:** the translated ("native") engine code is a translation of the American executable, so the European release runs on the interpreter (3-4 ms a frame on a normal PC, about a tenth of

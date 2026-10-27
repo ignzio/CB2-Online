@@ -173,7 +173,7 @@ uint64_t stateDigest(Platform& p) {
     return h.h;
 }
 
-bool saveState(Platform& p, const std::string& path, const std::vector<uint8_t>& extra, std::string& error) {
+bool saveStateToMemory(Platform& p, const std::vector<uint8_t>& extra, std::vector<uint8_t>& out, std::string& error) {
     if (!StateAccess::usable(p, error)) return false;
     Writer payload;
     StateAccess::platform(payload, p);
@@ -188,6 +188,13 @@ bool saveState(Platform& p, const std::string& path, const std::vector<uint8_t>&
     Hasher h;
     h.bytes(payload.out.data(), payload.out.size());
     pod(file, h.h);
+    out = std::move(file.out);
+    return true;
+}
+
+bool saveState(Platform& p, const std::string& path, const std::vector<uint8_t>& extra, std::string& error) {
+    Writer file;
+    if (!saveStateToMemory(p, extra, file.out, error)) return false;
 
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -211,6 +218,11 @@ bool loadState(Platform& p, const std::string& path, std::vector<uint8_t>& extra
     std::ifstream f(std::filesystem::u8path(path), std::ios::binary);
     if (!f) { error = "no saved state at " + path; return false; }
     std::vector<uint8_t> all((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    return loadStateFromMemory(p, all, extra, error);
+}
+
+bool loadStateFromMemory(Platform& p, const std::vector<uint8_t>& all, std::vector<uint8_t>& extra, std::string& error) {
+    if (!StateAccess::usable(p, error)) return false;
     Reader r;
     r.data = all.data();
     r.size = all.size();

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "disc.hpp"
@@ -26,6 +27,7 @@ public:
     uint32_t speedup = 1;
     uint32_t modesSet = 0;   // every bit ever written with Setmode (bit 5: whole sectors, 6: XA-ADPCM to the SPU, 7: double speed, 0: CD-DA)
 
+    std::string describe() const;   // one line of the controller's state (tools: why is the game waiting for the drive?)
     uint8_t read(uint32_t reg);
     void write(uint32_t reg, uint8_t v);
     void tick(uint64_t cycles);

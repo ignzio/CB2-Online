@@ -125,4 +125,12 @@ uint32_t CdRom::readDataWord() {
     return w;
 }
 
+std::string CdRom::describe() const {
+    char b[320];
+    std::snprintf(b, sizeof b, "cd: reading %d, lba %u, pending %zu%s, flags %02x enable %02x irqLine %d, status %02x mode %02x, data %zu/%zu bytes, params %zu, response %zu, index %d, request %02x",
+                  int(reading), lba, pending.size(), pending.empty() ? "" : (std::string(" (first due in ") + std::to_string(pending.front().due > now ? pending.front().due - now : 0) + " cycles, irq " + std::to_string(pending.front().irq) + ")").c_str(),
+                  flags, enable, int(irqLine), status, mode, std::min(dataPos, data.size()), data.size(), params.size(), response.size(), index, request);
+    return b;
+}
+
 }  // namespace psx

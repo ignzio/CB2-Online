@@ -52,6 +52,23 @@ second; `CB2_FAKEHZ=160` pretends to have such a monitor, `CB2_CONTINUOUS=1` for
   A true widescreen mode needs the engine's culling widened, which is a hack into the game code per level (not done).
 - **PGXP depth buffer** is not implemented: the game depends on painter's-algorithm order, and a depth buffer from the GTE depth would change what is drawn on top.
 
+## The freeze watchdog
+
+The engine's page allocator (the code that finds a free 64 KB slot for a page of level data) has a hang that nothing can interrupt: when every slot is held by an object it prints `!mem` and tries
+again in a loop on the main thread, so the picture stays black (the display is switched off during loads) and the game never moves on, while the window, the menu and the sound keep answering.
+Found from a save state of a frozen game: all 21 slots of the page table had holders, the request was for one more page of Crash's own data, the disc was idle and nothing was queued.
+What leads there is not known yet (a leak of holders, our online Crash, or a difference in timing from the console; it was seen on both releases).
+
+So the game watches for it (`src/play.cpp`, `Watchdog`): the platform counts the `!mem` messages (`allocFail` in `src/game_profile.cpp`), and when they have not stopped for three seconds the game goes back to a snapshot taken
+while it was healthy. Snapshots are whole-console states kept in memory every 15 seconds (8 ms each, 3.5 MB; the last two are kept) and never while the allocator is complaining; the older one is used. The player sees
+"THE GAME FROZE - BACK A FEW SECONDS", the memory card is untouched, other players' Crashes are not created again for 20 seconds, and `stderr` says in which level and with how many other players it happened.
+At most three recoveries an hour; without a snapshot (the freeze came in the first 15 s) the toast says to load a state (F9) or go to the main menu. `CB2_NOWATCHDOG=1` switches it off.
+It needs the interpreter, like online play (a game started with `--native` has no watchdog).
+
+Tools for investigating a freeze (`docs/DEVELOPMENT.md`): `cb2_boot <folder> <instructions> --load-state file` with `CB2_SAMPLE=1` (where the CPU is and who called it, the CD controller, the online objects in RAM),
+`CB2_HOOKPC=addr[,addr]` (registers at those addresses), `CB2_PAGEREFS=1` in the game (the page table every 60 frames: how many objects hold each slot), `CB2_FAKEFREEZE=frame` (pretend the allocator is stuck: tests the rollback),
+`CB2_SNAPLOG=1` (cost of each snapshot).
+
 ## Native world (Esc → Settings → Experimental, `native_world = on`, **unstable**)
 
 The level scenery is drawn from the level's .NSF file instead of from the game's projected polygons (`src/nativeworld.cpp`). It does not make the game faster (the GTE costs 0.2-0.4 ms of a

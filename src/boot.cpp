@@ -6,10 +6,12 @@
 #include <cstring>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "psx.hpp"
+#include "savestate.hpp"
 
 int main(int argc, char** argv) {
     if (argc < 2) { std::fprintf(stderr, "usage: cb2_boot <game folder> [instructions] [--trace] [--vram out.ppm]\n"); return 2; }
@@ -29,9 +31,10 @@ int main(int argc, char** argv) {
         {"l2", 1u << 8}, {"r2", 1u << 9}, {"l1", 1u << 10}, {"r1", 1u << 11}, {"triangle", 1u << 12}, {"circle", 1u << 13},
         {"cross", 1u << 14}, {"square", 1u << 15}};
     bool useNative = false;
-    std::string hwSitesOut;
+    std::string hwSitesOut, statePath;   // --load-state: start from a save state (a game that froze) instead of the boot
     for (int i = 2; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--native")) useNative = true;
+        else if (!std::strcmp(argv[i], "--load-state") && i + 1 < argc) statePath = argv[++i];
         else if (!std::strcmp(argv[i], "--hwsites") && i + 1 < argc) hwSitesOut = argv[++i];
         else if (!std::strcmp(argv[i], "--trace")) trace = true;
         else if (!std::strcmp(argv[i], "--irq")) irq = true;
@@ -63,8 +66,9 @@ int main(int argc, char** argv) {
         else limit = std::strtoull(argv[i], nullptr, 0);
     }
     psx::Platform p;
-    std::string exe = folder + "\\SCUS_941.54";
-    for (const auto& m : mods) if (std::filesystem::exists(m + "\\SCUS_941.54")) exe = m + "\\SCUS_941.54";
+    const char* exeName = std::filesystem::exists(folder + "\\SCES_009.67") ? "SCES_009.67" : "SCUS_941.54";   // the European or the American release
+    std::string exe = folder + "\\" + exeName;
+    for (const auto& m : mods) if (std::filesystem::exists(m + "\\" + exeName)) exe = m + "\\" + exeName;
     p.traceBios = trace;
     p.traceIrq = irq;
     p.cd.trace = cdTrace;
@@ -97,6 +101,33 @@ int main(int argc, char** argv) {
         for (const auto& [fr, path] : shots) if (fr == p.frames) writeDisplay(path);
     };
 
+    if (!statePath.empty()) {
+        std::vector<uint8_t> extra;
+        std::string err;
+        if (!psx::loadState(p, statePath, extra, err)) { std::fprintf(stderr, "cannot load the state: %s\n", err.c_str()); return 2; }
+        std::printf("loaded state %s (frame %llu, pc %08x)\n", statePath.c_str(), (unsigned long long)p.frames, p.cpu.pc);
+    }
+    if (const char* hp = std::getenv("CB2_HOOKPC")) {   // tool: CB2_HOOKPC=addr[,addr...] print the registers and the words a0 points at the first times the CPU reaches each pc
+        std::string list = hp;
+        for (size_t pos = 0; pos < list.size();) {
+            const size_t comma = list.find(',', pos);
+            const uint32_t at = uint32_t(std::strtoul(list.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos).c_str(), nullptr, 16));
+            pos = comma == std::string::npos ? list.size() : comma + 1;
+            auto hits = std::make_shared<int>(0);
+            const int cap = std::getenv("CB2_HOOKMAX") ? std::atoi(std::getenv("CB2_HOOKMAX")) : 6;
+            p.addHook(at, [hits, cap](psx::Platform& pl) {
+                if (++*hits > cap) return;
+                std::printf("[hook] pc %08x a0 %08x a1 %08x a2 %08x a3 %08x ra %08x sp %08x; *a0 = %08x %08x %08x %08x\n", pl.cpu.pc, pl.cpu.r[4], pl.cpu.r[5], pl.cpu.r[6], pl.cpu.r[7], pl.cpu.r[31], pl.cpu.r[29], pl.peek32(pl.cpu.r[4]), pl.peek32(pl.cpu.r[4] + 4), pl.peek32(pl.cpu.r[4] + 8), pl.peek32(pl.cpu.r[4] + 12));
+            });
+        }
+    }
+    if (const char* kill = std::getenv("CB2_KILL")) {   // tool: CB2_KILL=object:destroyRoutine - run the game's own destroy routine on an object (does removing it free a stuck game?)
+        const uint32_t obj = uint32_t(std::strtoul(kill, nullptr, 16));
+        const char* colon = std::strchr(kill, ':');
+        const uint32_t fn = colon ? uint32_t(std::strtoul(colon + 1, nullptr, 16)) : 0;
+        try { p.callFunction(fn, {obj, 0}, {0, 0}); std::printf("[kill] destroyed %08x with %08x\n", obj, fn); }
+        catch (const std::exception& e) { std::printf("[kill] failed: %s\n", e.what()); }
+    }
     std::map<uint32_t, uint64_t> hist;
     std::string stop;
     uint64_t done = 0;
@@ -106,6 +137,26 @@ int main(int argc, char** argv) {
         done += chunk;
         ++hist[p.cpu.pc];
         if (!stop.empty()) break;
+    }
+    if (std::getenv("CB2_SAMPLE")) {
+        std::printf("[sample] %s; istat %08x imask %08x\n", p.cd.describe().c_str(), p.istat, p.imask);
+        int marked = 0;   // objects the online code created (field 63 holds the marker 0x4D504C59)
+        for (uint32_t a = 0x80010000u; a < 0x80200000u; a += 4)
+            if (p.peek32(a) == 0x4D504C59u) { std::printf("[sample] online puppet object at %08x\n", a - 0x13Cu); ++marked; }
+        std::printf("[sample] %d online puppet object(s) in RAM\n", marked);
+    }
+    if (std::getenv("CB2_SAMPLE")) {   // tool: where does the CPU spend its time, and who called it? (a short sample of the program counter and the return address)
+        std::map<uint32_t, uint64_t> pcs, ras;
+        const uint64_t before = p.cpu.instructions;
+        for (int i = 0; i < 4000; ++i) { p.run(997); ++pcs[p.cpu.pc]; ++ras[p.cpu.r[31]]; }
+        std::printf("[sample] %llu instructions, frames %llu\n", (unsigned long long)(p.cpu.instructions - before), (unsigned long long)p.frames);
+        auto top = [](const std::map<uint32_t, uint64_t>& m, const char* tag) {
+            std::vector<std::pair<uint64_t, uint32_t>> v;
+            for (auto& [k, n] : m) v.push_back({n, k});
+            std::sort(v.rbegin(), v.rend());
+            for (size_t i = 0; i < v.size() && i < 14; ++i) std::printf("[sample] %s %08x %llu\n", tag, v[i].second, (unsigned long long)v[i].first);
+        };
+        top(pcs, "pc"); top(ras, "ra");
     }
     if (std::getenv("CB2_STEPDUMP")) {   // tool: the next instructions the CPU executes (where is it stuck?)
         for (int i = 0; i < 40; ++i) {

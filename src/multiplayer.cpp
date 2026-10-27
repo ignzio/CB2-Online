@@ -102,7 +102,7 @@ void Multiplayer::install() {
 }
 
 void Multiplayer::stateLoaded(uint32_t levelNow) {
-    level = levelNow & 0xFF;
+    level = cb2game::canonicalLevel(cb2game::current().region, levelNow);
     levelStartFrame = p.frames;
     player = playerSeen = 0;
     playerSteps = lastPlayerStep = 0;
@@ -179,7 +179,7 @@ uint32_t Multiplayer::findPlayer() {
 
 void Multiplayer::onLevel(uint32_t id) {
     if (debug()) std::printf("[mp] frame %llu: level %02X opened\n", (unsigned long long)p.frames, id & 0xFF);
-    level = id & 0xFF;
+    level = cb2game::canonicalLevel(cb2game::current().region, id);   // the language versions of the PAL warp room are one level for the other players
     levelStartFrame = p.frames;
     announce(level);   // until the new level's Crash exists others must not keep drawing the old one
     player = 0;
@@ -383,7 +383,12 @@ void Multiplayer::tick() {
 }
 
 std::vector<cb2net::PlayerState> Multiplayer::others() {
-    if (!opt.fake) return net.others();
+    if (!opt.fake) {
+        std::vector<cb2net::PlayerState> v = net.others();
+        // players of a version that sends the raw number of their language's warp room are in the warp room all the same
+        for (cb2net::PlayerState& s : v) s.level = uint8_t(cb2game::canonicalLevel(cb2game::current().region, s.level));
+        return v;
+    }
     std::vector<cb2net::PlayerState> v;
     if (!haveLocal || level == 0xFF) return v;
     if (opt.fake >= 2 && (p.frames / 360) % 2 == 1) return v;   // away for six seconds out of twelve

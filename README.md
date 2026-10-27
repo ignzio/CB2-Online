@@ -218,7 +218,7 @@ cmake --build build --config Release
 - Widescreen shows only what the game itself draws beyond its 4:3 view, so the new side margins can be empty at some edges. There is no PGXP depth buffer, and the renderer is OpenGL only (no Vulkan or DX12; the renderer is not the bottleneck).
 - The end of a level is detected through the game's own "go to the next level" request; it is verified for entering a level, and a real level end has not been
   captured yet ([docs/SPEEDRUN.md](docs/SPEEDRUN.md)). Please report a finished level that is not counted.
-- Loads are about 15 times shorter than on a console (`disc_speed`); what remains is the game's own work. If you still see a freeze, run with `CB2_FRAMELOG=1` and send the log.
+- Loads are about 15 times shorter than on a console (`disc_speed`); what remains is the game's own work. If the game still freezes (black picture, window answers) it goes back a few seconds on its own after three seconds ([freeze watchdog](docs/PERFORMANCE.md#the-freeze-watchdog)); please report where it happened (the bug report button includes the details).
 - The game uses no CD audio, reverb, noise or pitch modulation in anything tested; reverb is implemented anyway (everb = off to leave it out), noise and pitch modulation are not.
 - Versions 0.3 and 0.4+ do not see each other online (the network format changed in 0.4).
 

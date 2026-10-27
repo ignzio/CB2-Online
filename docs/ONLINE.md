@@ -92,6 +92,8 @@ What the networking code does about hostile input (reviewed in v0.8.1; see `src/
 
 ## The two releases
 
+One exception to "the same number is the same place": the European release has a warp room per language (levels 0x2D-0x30 next to 0x02); they all count as the warp room for the other players ([REGIONS.md](REGIONS.md)).
+
 Players of the European (PAL) and the American (NTSC-U) release never share a room: the two games have different code and data, so the extra Crash of one cannot be put into the
 other. Every packet carries a one-byte release number and ignores the other release's packets; the rendezvous server keeps one list of rooms per release; the lobby directory
 takes a `region` field (`u` or `p`) and lists only the rooms of the asker's release. The release is the one the game is running (`region` in `cb2.cfg`). Addresses inside the

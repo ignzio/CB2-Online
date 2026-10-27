@@ -451,19 +451,21 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
             const cb2net::Session& net = mp.session();
             canvas.centred(upper(room), 134, 34, kGold1, kGold2);
             if (net.locked()) lockIcon(canvas, 320 + canvas.width(upper(room), 34) * 0.5f + 14, 140, kGold1);
+            // two status lines that can both be there (the relay server and the lobby service), each on its own line
+            float statusY = 168;
             if (!net.directoryEnabled() && net.serverState() == 0) {
-                canvas.centred("THIS PC AND LOCAL NETWORK", 176, 16, kDim);
-            } else if (net.serverState() == 0) {
-                canvas.centred("", 176, 16, kDim);
-            } else {
+                canvas.centred("THIS PC AND LOCAL NETWORK", statusY, 15, kDim);
+                statusY += 18;
+            } else if (net.serverState() != 0) {
                 const bool up = net.serverState() == 2;
                 std::string st = up ? "SERVER CONNECTED" : "CONNECTING TO THE SERVER...";
                 if (!up && seconds() - stagingSince > 6.0) st = "SERVER DOES NOT ANSWER - LOCAL PLAYERS STILL WORK";
-                canvas.centred(st, 176, 18, up ? kGreen : kRed);
+                canvas.centred(st, statusY, 15, up ? kGreen : kRed);
+                statusY += 18;
             }
             if (net.directoryEnabled()) {
                 const bool listed = net.directoryReachable() && net.publicEndpoint().valid();
-                canvas.centred(listed ? "YOUR ROOM IS LISTED - OTHERS CAN JOIN IT" : (net.directoryReachable() ? "FINDING YOUR PUBLIC ADDRESS..." : "CONNECTING..."), 176, 16, listed ? kGreen : kDim);
+                canvas.centred(listed ? "YOUR ROOM IS LISTED - OTHERS CAN JOIN IT" : (net.directoryReachable() ? "FINDING YOUR PUBLIC ADDRESS..." : "CONNECTING..."), statusY, 15, listed ? kGreen : kDim);
             }
             plank(canvas, 130, 206, 380, 192, false);
             float y = 214;
