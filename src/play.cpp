@@ -321,6 +321,10 @@ int main(int argc, char** argv) {
                 const bool isPal = r.profile->region == cb2game::Region::Pal;
                 cfg.remember(exeDir, isPal ? "game_pal" : "game", r.profile->folderName);
                 (isPal ? cfg.gamePal : cfg.game) = r.folder;
+                if (setupRequested && cfg.havePal && cfg.haveNtsc) {   // a release was added on purpose: play the one that was just added
+                    cfg.region = isPal ? "pal" : "ntsc";
+                    cfg.remember(exeDir, "region", cfg.region);
+                }
                 cfg.resolvePaths(exeDir);
                 err = cfg.validate();
             }
@@ -441,8 +445,23 @@ int main(int argc, char** argv) {
         const bool checkUpdates = cfg.update && !std::string(CB2_UPDATE_REPO).empty();
         if (checkUpdates) updater.startCheck(CB2_UPDATE_REPO, version);
         cb2crash::setPhase("lobby");
-        const cb2lobby::Outcome outcome = cb2lobby::run(win, mp, online, lobbyScript, checkUpdates ? &updater : nullptr, version);
+        cb2lobby::ReleaseRow releaseRow;
+        releaseRow.show = !bundled;
+        releaseRow.otherInstalled = release.region == cb2game::Region::Pal ? cfg.haveNtsc : cfg.havePal;
+        const cb2lobby::Outcome outcome = cb2lobby::run(win, mp, online, lobbyScript, checkUpdates ? &updater : nullptr, version, releaseRow);
         if (outcome == cb2lobby::Outcome::Quit) { glfwTerminate(); return 0; }
+        if (outcome == cb2lobby::Outcome::SwitchRelease) {
+            // the other release: remembered in cb2.cfg, then a fresh copy of the game starts with it (or with the setup screen, when its game files are not installed yet)
+            cfg.remember(exeDir, "name", online.name);
+            glfwTerminate();
+            if (releaseRow.otherInstalled) {
+                cfg.remember(exeDir, "region", release.region == cb2game::Region::Pal ? "ntsc" : "pal");
+                cb2::relaunchToLobby(argc, argv);
+            } else {
+                cb2::relaunchToLobby(argc, argv, "--setup");
+            }
+            return 0;
+        }
         if (outcome == cb2lobby::Outcome::Update) {
             std::string err;
             if (updater.install(err)) {

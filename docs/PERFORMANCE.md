@@ -1,6 +1,6 @@
 # Speed, smoothness and 60 fps
 
-## 60 fps smoothing (*Esc → Settings → Display → 60 fps smoothing*, `smooth = on` in `cb2.cfg`)
+## 60 fps smoothing (*Esc → Settings → Experimental → 60 fps smoothing*, unstable, `smooth = on` in `cb2.cfg`)
 
 Crash Bandicoot 2 draws a new picture every second vertical blank, about 30 per second. With smoothing on, the picture in between is drawn too, so
 the screen changes 60 times a second.

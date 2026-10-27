@@ -69,8 +69,8 @@ std::vector<PauseMenu::Item> PauseMenu::items() const {
     }
     case Page::Settings: return {kGraphics, kSound, kExperimental, kBack};
     case Page::Sound: return {kVolume, kTimer, kBack};
-    case Page::Graphics: return {kFullscreen, kWide, kFilter, kTextures, kPerspective, kSmooth, kVsync, kBack};
-    case Page::Experimental: return {kNative, kBack};
+    case Page::Graphics: return {kFullscreen, kFilter, kTextures, kPerspective, kVsync, kBack};
+    case Page::Experimental: return {kNative, kWide, kSmooth, kBack};
     case Page::Online: return {kTags, kOpacity, kRoster, kBack};
     default: return {};
     }
@@ -336,8 +336,8 @@ void PauseMenu::draw(double t) {
         barX = 262; barW = 144;
         const size_t n = list.size();   // the rows must clear the description panel at the bottom
         const float step = n >= 9 ? 37.0f : n == 8 ? 38.0f : n == 7 ? 41.0f : 44.0f;
-        float y = n >= 9 ? 92.0f : n == 8 ? 94.0f : n == 7 ? 98.0f : page == Page::Experimental ? 126.0f : 112.0f;
-        if (page == Page::Experimental) canvas.centred("NOT FINISHED YET - THESE OPTIONS CAN GLITCH", 88, 15, kWarn);
+        float y = n >= 9 ? 92.0f : n == 8 ? 94.0f : n == 7 ? 98.0f : page == Page::Experimental ? 116.0f : 112.0f;
+        if (page == Page::Experimental) canvas.centred("NOT FINISHED YET - THESE OPTIONS CAN GLITCH", 86, 15, kWarn);
         for (size_t i = 0; i < list.size(); ++i, y += step) {
             const bool on = int(i) == sel;
             const int idx = int(i);
@@ -369,14 +369,20 @@ void PauseMenu::draw(double t) {
             case kFilter: valueRow(idx, y, on, "PICTURE", filterName(s->filter), kTeal); break;
             case kFullscreen: valueRow(idx, y, on, "FULLSCREEN", ctx.isFullscreen && ctx.isFullscreen() ? "ON" : "OFF", kTeal); break;
             case kTimer: valueRow(idx, y, on, "LEVEL TIMER", s->timer ? "ON" : "OFF", kTeal); break;
-            case kWide: valueRow(idx, y, on, "WIDESCREEN", s->widescreen ? "ON" : "OFF", kTeal); break;
+            case kWide:
+                valueRow(idx, y, on, "WIDESCREEN", s->widescreen ? "ON" : "OFF", kTeal);
+                badge(146 + canvas.width("WIDESCREEN", 22) + 12, y + 10);
+                break;
             case kPerspective: valueRow(idx, y, on, "PERSPECTIVE", s->perspective ? "ON" : "OFF", kTeal); break;
             case kNative:
                 valueRow(idx, y, on, "NATIVE WORLD", s->nativeWorld ? "ON" : "OFF", kTeal);
                 badge(146 + canvas.width("NATIVE WORLD", 22) + 12, y + 10);
                 break;
             case kTextures: valueRow(idx, y, on, "TEXTURES", s->textures ? "SMOOTH" : "SHARP", kTeal); break;
-            case kSmooth: valueRow(idx, y, on, "60 FPS SMOOTHING", s->smooth ? "ON" : "OFF", kTeal); break;
+            case kSmooth:
+                valueRow(idx, y, on, "60 FPS SMOOTHING", s->smooth ? "ON" : "OFF", kTeal);
+                badge(146 + canvas.width("60 FPS SMOOTHING", 22) + 12, y + 10);
+                break;
             case kVsync: valueRow(idx, y, on, "VSYNC", s->vsync ? "ON" : "OFF", kTeal); break;
             case kTags: valueRow(idx, y, on, "NAME TAGS", s->nameTags ? "ON" : "OFF", kTeal); break;
             case kRoster: valueRow(idx, y, on, "PLAYER LIST", s->roster ? "ON" : "OFF", kTeal); break;
@@ -388,9 +394,9 @@ void PauseMenu::draw(double t) {
             switch (item) {
             case kResume: return {"BACK TO THE GAME", "", false};
             case kSettings: return {"DISPLAY, SOUND AND EXPERIMENTAL OPTIONS", "", false};
-            case kGraphics: return {"FULLSCREEN, WIDESCREEN, SHARPNESS, 60 FPS AND VSYNC", "", false};
+            case kGraphics: return {"FULLSCREEN, SHARPNESS, TEXTURES, PERSPECTIVE AND VSYNC", "", false};
             case kSound: return {"THE VOLUME AND THE LEVEL TIMER", "", false};
-            case kExperimental: return {"UNSTABLE: FEATURES THAT ARE NOT FINISHED", "THEY CAN GLITCH. THE GAME WORKS WITHOUT THEM", true};
+            case kExperimental: return {"UNSTABLE: NATIVE WORLD, WIDESCREEN AND 60 FPS", "THEY CAN GLITCH. THE GAME WORKS WITHOUT THEM", true};
             case kOnline: return {"NAME TAGS, THE PLAYER LIST AND HOW SOLID THE OTHERS ARE", "", false};
             case kRecords: return {"YOUR BEST TIME IN EVERY LEVEL", "", false};
             case kControls: return {"KEYBOARD AND GAME PAD BUTTONS", "", false};
@@ -400,11 +406,11 @@ void PauseMenu::draw(double t) {
             case kVolume: return {"THE LOUDNESS OF MUSIC AND EFFECTS", "", false};
             case kTimer: return {"SHOW THE TIME OF THE LEVEL IN THE CORNER", "", false};
             case kFullscreen: return {"FILL THE WHOLE SCREEN WITH THE GAME", "", false};
-            case kWide: return {"FILL A WIDE WINDOW INSTEAD OF BLACK BARS AT THE SIDES", "", false};
+            case kWide: return {"UNSTABLE: FILLS A WIDE WINDOW INSTEAD OF BLACK BARS", "THE NEW SIDES CAN BE EMPTY AT SOME EDGES. WORKS BEST WITH NATIVE WORLD", true};
             case kFilter: return {"HOW THE PICTURE IS SCALED TO THE WINDOW", "NEAREST: PIXELS   SMOOTH: BLURRY   SHARP: CRISP", false};
             case kTextures: return {"SHARP PIXELS LIKE THE CONSOLE, OR SMOOTHED TEXTURES", "", false};
             case kPerspective: return {"STRAIGHT TEXTURES ON SLANTED SURFACES", "THE CONSOLE'S WOBBLE IS GONE", false};
-            case kSmooth: return {"IN-BETWEEN PICTURES FOR SMOOTHER MOTION", "BEST ON A MONITOR WITH A HIGH REFRESH RATE", false};
+            case kSmooth: return {"UNSTABLE: IN-BETWEEN PICTURES FOR SMOOTHER MOTION", "BEST ON A HIGH REFRESH RATE MONITOR. CAN SHOW GLITCHES", true};
             case kVsync: return {"WAIT FOR THE MONITOR: NO TEARING", "OFF: FASTER REPLIES, THE PICTURE MAY TEAR", false};
             case kNative: return {"UNSTABLE: DRAWS THE LEVEL FROM ITS FILES", "IT CAN FLICKER OR MISS PARTS. OFF IS THE SAFE CHOICE", true};
             case kTags: return {"THE NAMES OVER THE OTHER PLAYERS", "", false};

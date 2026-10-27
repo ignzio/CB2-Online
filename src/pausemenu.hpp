@@ -3,9 +3,9 @@
 // is open and the caller saves the settings when changed() says so.
 //   Main              Resume / Settings / Online (online play only) / Records / Controls / Report a bug / Main menu / Quit game
 //   Settings          Display / Sound and timer / Experimental (the unstable features)
-//   Display           fullscreen, widescreen, picture filter, textures, perspective, 60 fps smoothing, vsync
+//   Display           fullscreen, picture filter, textures, perspective, vsync
 //   Sound and timer   volume slider, level timer
-//   Experimental      Native world (UNSTABLE)
+//   Experimental      Native world, widescreen, 60 fps smoothing (all UNSTABLE)
 //   Online            name tags, how solid the other players are (slider), the player list at the right edge
 //   Controls          keyboard and game pad bindings side by side; Enter binds the column under the cursor, a game pad button or key is then pressed
 // Keyboard, game pad and mouse all work: arrows / D-pad / hover to pick, Enter / A / click to choose, Left / Right / drag to move a slider, Esc / B /

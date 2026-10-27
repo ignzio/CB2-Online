@@ -19,6 +19,8 @@ release's own speed; the level timer, the pacing of the window and the 60 fps sm
 
 ## Choosing a release
 
+In the game: the lobby's **RELEASE** row (European PAL / American NTSC-U) switches to the other release when both are installed (it is remembered as `region` in `cb2.cfg` and the game restarts into the lobby), and when only one is installed it opens the setup screen to add the other, then plays that one.
+
 `cb2.cfg`: `game = data` (American folder), `game_pal = data-pal` (European folder), `region = auto | pal | ntsc`. With `auto` the European release is played when it is installed.
 The first start shows the game's own setup screen (`src/setup.cpp`): *which release do you have?* with what it means, then the Windows file window on top of the game for the disc image, a check that the disc is the release that was chosen (a disc of the other release is refused before anything is copied), and a progress bar. `Crash2.exe --setup` (or `Add another release.bat`) shows it again to add the second release; `--setup-only` quits afterwards. The importer itself (`--import`, or a file dropped on the exe) accepts either disc and puts the files in the matching folder. `--game <folder>` plays exactly that folder.
 

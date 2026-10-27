@@ -31,7 +31,7 @@ std::string quote(const std::string& a) {
 
 }   // namespace
 
-bool relaunchToLobby(int argc, char** argv) {
+bool relaunchToLobby(int argc, char** argv, const char* extraArg) {
 #ifdef _WIN32
     wchar_t exe[MAX_PATH * 2] = {};
     if (!GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe)))) return false;
@@ -39,8 +39,8 @@ bool relaunchToLobby(int argc, char** argv) {
     std::string exe8(size_t(len > 0 ? len - 1 : 0), '\0');
     WideCharToMultiByte(CP_UTF8, 0, exe, -1, exe8.data(), len, nullptr, nullptr);
 
-    static const char* withValue[] = {"--room", "--directory", "--rendezvous", "--menu-at", "--menu-script", "--lobby-script", "--lobby-shot", "--capture", "--press", "--pace-from", "--capture-after-puppet"};
-    static const char* flagOnly[] = {"--online", "--no-lobby", "--lobby", "--autostart", "--hidden", "--window-capture"};
+    static const char* withValue[] = {"--room", "--directory", "--rendezvous", "--menu-at", "--menu-script", "--lobby-script", "--lobby-shot", "--capture", "--import", "--setup-script", "--setup-shot", "--press", "--pace-from", "--capture-after-puppet"};
+    static const char* flagOnly[] = {"--online", "--no-lobby", "--lobby", "--autostart", "--hidden", "--window-capture", "--setup", "--setup-only"};
     std::string line = quote(exe8);
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -51,6 +51,7 @@ bool relaunchToLobby(int argc, char** argv) {
         if (!drop && i < argc) line += " " + quote(a);
     }
     line += " --lobby";
+    if (extraArg && *extraArg) line += std::string(" ") + extraArg;
 
     int wlen = MultiByteToWideChar(CP_UTF8, 0, line.c_str(), -1, nullptr, 0);
     std::wstring wline(size_t(wlen), L'\0');

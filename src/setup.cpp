@@ -333,7 +333,7 @@ Result run(const std::string& exeDir, bool firstRun, bool hidden, const Script& 
                     canvas.centred(tail(canvas, upper(result.folder), 15, 540), 206, 15, kTeal);
                     canvas.centred("YOU DO NOT NEED THE DISC IMAGE ANY MORE.", 244, 18, kWhite1, kWhite2);
                     const bool other = result.profile == &cb2game::pal() ? !installed(cb2game::ntsc()) : !installed(cb2game::pal());
-                    if (other) canvas.centred("TO ADD THE OTHER RELEASE LATER, START THE GAME WITH  --SETUP.", 290, 14, kDim);
+                    if (other) canvas.centred("THE OTHER RELEASE CAN BE ADDED LATER FROM THE PLAY SCREEN (RELEASE ROW).", 290, 14, kDim);
                     plank(canvas, 190, 340, 260, 40, true);
                     canvas.centred(firstRun ? "START THE GAME" : "CONTINUE", 346, 26, kGold1, kGold2);
                     canvas.centred("ENTER  CONTINUE", 446, 18, kDim);

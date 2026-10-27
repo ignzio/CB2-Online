@@ -66,7 +66,7 @@ enum class Screen { Main, Rooms, Waiting };
 
 const char* releaseLabel() { return cb2net::localRegion() == 1 ? "EUROPEAN (PAL)" : "AMERICAN (NTSC-U)"; }
 bool passwordChar(char c) { return c >= 33 && c < 127; }
-enum Item { kOffline, kLocal, kOnline, kName, kQuit, kUpdate, kItems };
+enum Item { kOffline, kLocal, kOnline, kName, kRelease, kQuit, kUpdate, kItems };
 
 // One line of the room list: the "create" row, a room, or a dedicated server from the lobby directory.
 struct Row {
@@ -88,7 +88,7 @@ std::string upperKey(std::string s) {
 
 }  // namespace
 
-Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, const Script& script, cb2update::Updater* updater, const std::string& version) {
+Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, const Script& script, cb2update::Updater* updater, const std::string& version, const ReleaseRow& releaseRow) {
     Canvas canvas;
     if (!canvas.init()) return Outcome::Offline;
 
@@ -127,7 +127,7 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
     auto order = [&] {
         std::vector<int> o;
         if (updateShown()) o.push_back(kUpdate);
-        for (int i = 0; i < kUpdate; ++i) o.push_back(i);
+        for (int i = 0; i < kUpdate; ++i) if (i != kRelease || releaseRow.show) o.push_back(i);
         return o;
     };
     auto moveSelection = [&](int dir) {
@@ -305,6 +305,7 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                 case kLocal: openRooms(true); break;
                 case kOnline: openRooms(false); break;
                 case kName: editing = selected; break;
+                case kRelease: options.name = name; return Outcome::SwitchRelease;
                 case kQuit: return Outcome::Quit;
                 case kUpdate:
                     if (updater && updater->state() == cb2update::State::Available) { updating = true; updater->startDownload(); }
@@ -359,11 +360,17 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                 for (char& c : v) c = char(std::toupper(static_cast<unsigned char>(c)));
                 updateLabel = updater->state() == cb2update::State::Downloading ? "DOWNLOADING  " + std::to_string(updater->percent()) + "%" : "UPDATE TO  V" + v;
             }
-            const char* labels[kItems] = {"PLAY OFFLINE", "PLAY LOCAL", "PLAY ONLINE", "NAME", "QUIT", ""};
-            const char* hints[kItems] = {"JUST THE GAME, LIKE ALWAYS", "FRIENDS ON THIS PC OR YOUR LOCAL NETWORK", "ROOMS AND SERVERS FROM EVERYWHERE - NOTHING TO TYPE", "SHOWN OVER YOUR CRASH", "", "A NEWER VERSION IS ON GITHUB - THE GAME RESTARTS WHEN IT IS DONE"};
+            const bool palNow = cb2net::localRegion() == 1;
+            const std::string otherName = palNow ? "AMERICAN" : "EUROPEAN";
+            const std::string releaseHint = releaseRow.otherInstalled
+                ? "SWITCH TO THE " + otherName + " RELEASE - THE GAME RESTARTS. ROOMS, SAVES AND RECORDS ARE SEPARATE"
+                : "ADD THE " + otherName + " RELEASE: YOU NEED ITS DISC IMAGE. THE GAME RESTARTS";
+            const char* labels[kItems] = {"PLAY OFFLINE", "PLAY LOCAL", "PLAY ONLINE", "NAME", "RELEASE", "QUIT", ""};
+            const char* hints[kItems] = {"JUST THE GAME, LIKE ALWAYS", "FRIENDS ON THIS PC OR YOUR LOCAL NETWORK", "ROOMS AND SERVERS FROM EVERYWHERE - NOTHING TO TYPE", "SHOWN OVER YOUR CRASH", releaseHint.c_str(), "", "A NEWER VERSION IS ON GITHUB - THE GAME RESTARTS WHEN IT IS DONE"};
             const bool withUpdate = updateShown();
-            const float step = withUpdate ? 44.0f : 52.0f, rowH = withUpdate ? 36.0f : 42.0f, textSize = withUpdate ? 25.0f : 30.0f;
-            float y = withUpdate ? 134.0f : 150.0f;
+            const bool compact = withUpdate || releaseRow.show;   // more rows: tighter
+            const float step = withUpdate && releaseRow.show ? 40.0f : compact ? 44.0f : 52.0f, rowH = withUpdate && releaseRow.show ? 34.0f : compact ? 36.0f : 42.0f, textSize = compact ? 25.0f : 30.0f;
+            float y = withUpdate && releaseRow.show ? 128.0f : compact ? 134.0f : 150.0f;
             for (const int i : order()) {
                 const bool sel = i == selected;
                 plank(canvas, 130, y, 380, rowH, sel);
@@ -374,14 +381,19 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                     canvas.text(label, 146, y + 6, 26, sel ? kGold1 : kWhite1, sel ? kGold2 : kWhite2);
                     const float w = canvas.width(shown, 24);
                     canvas.text(shown, 496 - w, y + 8, 24, edit ? kGreen : kWhite1);
+                } else if (i == kRelease) {
+                    const std::string value = palNow ? "EUROPEAN PAL" : "AMERICAN NTSC-U";
+                    canvas.text(label, 146, y + (compact ? 4 : 6), compact ? 24.0f : 26.0f, sel ? kGold1 : kWhite1, sel ? kGold2 : kWhite2);
+                    canvas.text(value, 496 - canvas.width(value, 22), y + (compact ? 6 : 8), 22, sel ? rgb(255, 244, 200) : kTeal);
                 } else {
                     canvas.text(label, 320 - canvas.width(label, textSize) * 0.5f, y + 4, textSize, i == kUpdate ? kGreen : (sel ? kGold1 : kWhite1), sel ? kGold2 : kWhite2);
                 }
                 y += step;
             }
-            if (!version.empty()) { const std::string v = "V" + version + (cb2net::localRegion() == 1 ? "  PAL" : "  NTSC-U"); canvas.text(v, 626 - canvas.width(v, 14), 34, 14, kDim); }
-            if (editing < 0 && hints[selected][0]) canvas.centred(hints[selected], 418, 16, kDim);
-            if (!message.empty()) canvas.centred(message, 394, 22, kRed);
+            if (!version.empty()) { const std::string v = "V" + version + (cb2net::localRegion() == 1 ? "  PAL" : "  NTSC-U"); canvas.text(v, 626 - canvas.width(v, 14), 8, 14, kWhite2); }
+            const float hintY = withUpdate && releaseRow.show ? 408.0f : 418.0f;
+            if (editing < 0 && hints[selected][0]) canvas.centred(hints[selected], hintY, selected == kRelease ? 13.0f : 16.0f, kDim);
+            if (!message.empty()) canvas.centred(message, hintY - 24.0f, 22, kRed);
             canvas.centred(editing >= 0 ? "TYPE.  BACKSPACE DELETES.  ENTER WHEN DONE" : "UP DOWN  SELECT      ENTER  CHOOSE      ESC  QUIT", 446, 18, kDim);
         } else if (screen == Screen::Rooms) {
             title(canvas, localMode ? "LOCAL ROOMS" : "ONLINE ROOMS");

@@ -16,7 +16,7 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 ## Features
 
 **Both releases**
-- The **European (PAL)** and the **American (NTSC-U)** release both run, at their own speed (50 Hz and 59.94 Hz), with their own records and save states. With both installed the game starts the PAL one (`region` in `cb2.cfg`). Players of the two releases play in separate rooms: their game data differs. See [docs/REGIONS.md](docs/REGIONS.md).
+- The **European (PAL)** and the **American (NTSC-U)** release both run, at their own speed (50 Hz and 59.94 Hz), with their own records and save states. With both installed the game starts the PAL one (`region` in `cb2.cfg`); the lobby's **RELEASE** row switches to the other one (the game restarts) or, when it is not installed yet, adds it (the setup screen asks for its disc image). Players of the two releases play in separate rooms: their game data differs. See [docs/REGIONS.md](docs/REGIONS.md).
 
 **Multiplayer**
 - Play with friends in the **same level at the same time**: every other player is a real Crash in your game, with animation, position and a floating name tag.
@@ -38,10 +38,10 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 
 **Graphics and sound**
 - **OpenGL renderer** at up to 8x the original resolution (default 4x) with unrounded vertex positions, so the geometry does not wobble.
-- **60 fps smoothing** (optional): the game draws 30 pictures per second; this draws the pictures in between.
+- **60 fps smoothing** (optional, **unstable**, *Esc → Settings → Experimental*): the game draws 30 pictures per second; this draws the pictures in between.
 - **Smooth textures** (optional): bilinear filtering instead of the blocky texels. **Perspective-correct textures** (optional): no more swimming textures on floors and walls.
 - **Native world** (optional, **unstable**, *Esc → Settings → Experimental*): the level scenery is drawn by OpenGL straight from the level files, with a depth buffer and perspective-correct textures, instead of from the polygons the console's code projected. It is what makes widescreen show real geometry in the side margins, and it moves the camera exactly for the 60 fps pictures in between. Water and other see-through polygons stay the game's own.
-- **Widescreen** (optional): the picture at your window's aspect ratio (see the limits below).
+- **Widescreen** (optional, **unstable**, *Esc → Settings → Experimental*): the picture at your window's aspect ratio (see the limits below).
 - **High refresh rates:** with 60 fps smoothing on a 90+ Hz monitor every refresh shows its own picture (160 Hz = 160 distinct pictures a second).
 - Display filters (nearest / bilinear / sharp bilinear), fullscreen, vsync, 4:3 picture whatever the window shape.
 - Volume slider; the original sound and music.
@@ -72,7 +72,7 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 3. **First start only:** the game's own setup screen asks **which release you have** - European (PAL) or American (NTSC-U) - and explains what that means: you play, and meet other players online,
    with that release only (the two are kept apart: their rooms, saves, records and save states do not mix). Then the usual Windows file window opens on top of the game: pick the `.cue`
    (or `.bin` / `.iso`) of that disc. The game checks that the disc really is the release you chose, copies the files it needs into `data-pal` (European) or `data` (American) with a progress bar, once, and starts.
-   To add the other release later, start `Add another release.bat` (or `Crash2.exe --setup`). You can also drop the `.cue` / `.iso` on `Crash2.exe` (or on the setup window), or run `Crash2.exe --import "path\to\disc.cue"`, which detects the release by itself.
+   To add or switch to the other release later use the **RELEASE** row of the lobby, `Add another release.bat` or `Crash2.exe --setup`. You can also drop the `.cue` / `.iso` on `Crash2.exe` (or on the setup window), or run `Crash2.exe --import "path\to\disc.cue"`, which detects the release by itself.
    Compressed formats (`.chd`, `.pbp`, `.ecm`) are not supported. If you already have the files extracted, copy `SCES_009.67` (European) or `SCUS_941.54` (American), `SYSTEM.CNF` and the
    `S0` .. `S3` folders into `data-pal` or `data` yourself.
 4. The lobby opens. Choose **Play Online**, or **Play Offline** to play alone.
@@ -135,9 +135,9 @@ Left-Right or dragging to move a slider, `Esc` / B / right click to go back.
 
 | Page | What is on it |
 | --- | --- |
-| **Settings → Display** | fullscreen, **widescreen**, display filter, **textures** (sharp / smooth), **perspective** correction, **60 fps smoothing**, vsync |
+| **Settings → Display** | fullscreen, display filter, **textures** (sharp / smooth), **perspective** correction, vsync |
 | **Settings → Sound and timer** | volume, level timer |
-| **Settings → Experimental** | **native world** (marked **UNSTABLE**: it can flicker or miss parts; off is the safe choice) |
+| **Settings → Experimental** | **native world**, **widescreen** and **60 fps smoothing** (all marked **UNSTABLE**: they can flicker, miss parts or glitch; off is the safe choice) |
 | **Online** | name tags, **opacity of the other players**, the player list |
 | **Records** | your best time and runs per level |
 | **Controls** | keyboard and game pad bindings side by side; `Enter` rebinds, `Del` clears, a key already in use swaps |
@@ -180,7 +180,7 @@ Everything in the menu is remembered in `cb2.cfg` next to `Crash2.exe`; the file
 | `scale` | internal resolution multiplier (1-8) |
 | `game`, `game_pal`, `region` | the American and European game folders; `region = auto` (default) / `pal` / `ntsc` chooses which one to play when both are installed |
 | `volume`, `filter`, `timer` | *Settings → Sound and timer* and *Display* |
-| `textures`, `perspective`, `native_world`, `widescreen`, `smooth`, `vsync`, `refresh_rate` | *Settings → Display* and *Experimental* (`refresh_rate = 0` uses your monitor's rate) |
+| `textures`, `perspective`, `native_world`, `widescreen`, `smooth`, `vsync`, `refresh_rate` | *Settings → Display* and *Experimental* (`widescreen` and `smooth` are on the Experimental page; `refresh_rate = 0` uses your monitor's rate) |
 | `disc_speed` | how many times faster than the console's drive the game's disc reads are (1-24, default 16) |
 | `nametags`, `opacity`, `roster` | the *Online* page |
 | `key_<button>`, `pad_<button>` | bindings |
