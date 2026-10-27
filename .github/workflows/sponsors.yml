@@ -1,0 +1,47 @@
+# Keeps docs/sponsors.json (the totals the project page uses for its milestone bars) up to date from GitHub Sponsors.
+# One-time setup: add a repository secret SPONSORS_TOKEN = a *classic* personal access token with the read:user scope, created by the sponsored account (ignzio).
+# Settings > Secrets and variables > Actions > New repository secret. Without it this workflow does nothing and the page uses the amount typed into docs/config.js.
+name: Update sponsors total
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: sponsors
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the totals from GitHub Sponsors
+        env:
+          SPONSORS_TOKEN: ${{ secrets.SPONSORS_TOKEN }}
+        run: |
+          if [ -z "$SPONSORS_TOKEN" ]; then
+            echo "::notice::No SPONSORS_TOKEN secret: the sponsors total is not updated (see the comment at the top of this file)."
+            exit 0
+          fi
+          python3 tools/update_sponsors.py
+      - name: Commit and republish the page when the totals changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- docs/sponsors.json; then
+            echo "nothing changed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/sponsors.json
+          git commit -m "Update the sponsors total"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/pages/builds" >/dev/null || true

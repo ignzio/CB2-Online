@@ -33,7 +33,25 @@ paid plan (and then serves the page publicly anyway, but the downloads would sti
 footage (a `<video>` in the hero works well). Open `docs/index.html` in a browser to preview it (or `python -m http.server` in `docs/`); the download section reads the latest release live from the GitHub API.
 
 Milestones (`config.js`): `status` is `done`, `active` or `planned`; `goal` is the cumulative amount that has to be raised for it; the bars follow `raised`, which you update by hand.
-The current list: online multiplayer (done), native world renderer (in progress), speedrun multiplayer, dedicated servers, native water/ice, co-op mode, skins, level editor, custom levels, freeroam.
+The current list: online multiplayer (done), native world renderer (in progress), speedrun multiplayer, dedicated servers, native water/ice, co-op mode, skins, level editor, custom levels, freeroam. Goals are in US dollars (what GitHub Sponsors pays in).
+
+## GitHub Sponsors: the button and the automatic totals
+
+The donation section shows GitHub's own *Sponsor* button (`config.js` -> `donate` -> `iframe`), and `.github/FUNDING.yml` puts a Sponsor button on the repository page.
+
+The milestone bars and "Raised so far" follow the money automatically:
+
+1. `tools/update_sponsors.py` asks the GitHub GraphQL API (`viewer.sponsorshipsAsMaintainer`, private sponsors included, only the totals are kept) and writes `docs/sponsors.json`:
+   `raised` = every one-time sponsorship ever made + the monthly pledges that are active now (GitHub gives no history of cancelled monthly payments), in US dollars.
+2. `.github/workflows/sponsors.yml` runs it every 3 hours (and on demand: Actions > *Update sponsors total* > *Run workflow*), commits the file when the numbers changed, and asks Pages to rebuild.
+3. `docs/app.js` reads `sponsors.json`, adds it to the hand-typed `raised` of `config.js` (use that for Ko-fi, PayPal ...), fills the bars, and marks a *planned* milestone **Funded** when its goal is reached.
+   *Done* and *In progress* stay manual: money does not finish a feature. Without a `sponsors.json` the page simply shows the typed-in amount.
+
+**One-time setup (needs you):** the default Actions token cannot read Sponsors, so create a **classic** personal access token with the `read:user` scope on the sponsored account (GitHub > Settings > Developer settings >
+Personal access tokens > Tokens (classic)) and add it to this repository as the secret `SPONSORS_TOKEN` (Settings > Secrets and variables > Actions). Until then the workflow only prints a notice. Test it by hand with
+`SPONSORS_TOKEN=<token> python tools/update_sponsors.py`.
+
+There is no way to read Sponsors from the page's own JavaScript without a token (the data is private to the maintainer), which is why a scheduled job writes a static file. Amounts from other platforms are not read.
 
 ## Donations
 

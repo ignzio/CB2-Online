@@ -6,12 +6,13 @@ window.CB2_SITE = {
   // Donation buttons. Leave "url" empty to hide a button. Replace the placeholders with your own pages.
   donate: [
     { name: "Ko-fi", url: "", note: "one-off or monthly" },
-    { name: "GitHub Sponsors", url: "", note: "monthly" },
+    { name: "GitHub Sponsors", url: "https://github.com/sponsors/ignzio", iframe: "https://github.com/sponsors/ignzio/button", note: "monthly or one-off" },
     { name: "PayPal", url: "", note: "one-off" }
   ],
-  // Update this number by hand when donations arrive (in the currency below). It only drives the progress bars.
+  // What was raised outside GitHub Sponsors (Ko-fi, PayPal ...), typed in by hand. GitHub Sponsors is read automatically: docs/sponsors.json is refreshed every few hours by
+  // .github/workflows/sponsors.yml (see docs/WEBSITE.md) and added to this number. Both only drive the progress bars. GitHub Sponsors amounts are in US dollars.
   raised: 0,
-  currency: "EUR",
+  currency: "USD",
 
   // Milestones. status: "done" | "active" | "planned". "goal" is the total that has to be raised for it (cumulative).
   milestones: [

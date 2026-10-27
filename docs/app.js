@@ -36,26 +36,52 @@
       $("dl-version").textContent = "";
     });
 
-  // milestones
+  // what GitHub Sponsors has brought in (docs/sponsors.json, refreshed by a scheduled workflow); added to the hand-typed amount
+  var raised = cfg.raised || 0;
+  function showMilestones() {
   var box = $("milestones");
+  box.innerHTML = "";
   cfg.milestones.forEach(function (m) {
-    var pct = m.status === "done" ? 100 : m.goal > 0 ? Math.max(0, Math.min(100, Math.round(cfg.raised / m.goal * 100))) : (m.status === "active" ? 100 : 0);
+    var pct = m.status === "done" ? 100 : m.goal > 0 ? Math.max(0, Math.min(100, Math.round(raised / m.goal * 100))) : (m.status === "active" ? 100 : 0);
     var el = document.createElement("article");
     el.className = "ms " + m.status;
-    var tag = m.status === "done" ? "Done" : m.status === "active" ? "In progress" : "Planned";
+    var funded = m.status === "planned" && m.goal > 0 && raised >= m.goal;
+    var tag = m.status === "done" ? "Done" : m.status === "active" ? "In progress" : funded ? "Funded" : "Planned";
     el.innerHTML = '<header><h3></h3><span class="tag">' + tag + '</span></header><p></p><div class="bar"><i></i></div><div class="bar-label"></div>';
     el.querySelector("h3").textContent = m.title;
     el.querySelector("p").textContent = m.text;
     el.querySelector(".bar i").style.width = pct + "%";
-    el.querySelector(".bar-label").textContent = m.status === "done" ? "Delivered" : m.goal > 0 ? money(Math.min(cfg.raised, m.goal)) + " of " + money(m.goal) : "Funded by the project";
+    el.querySelector(".bar-label").textContent = m.status === "done" ? "Delivered" : m.goal > 0 ? money(Math.min(raised, m.goal)) + " of " + money(m.goal) : "Funded by the project";
     box.appendChild(el);
   });
-  $("raised").textContent = money(cfg.raised);
+  $("raised").textContent = money(raised);
+  }
+  showMilestones();
+  fetch("sponsors.json", { cache: "no-cache" })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (s) {
+      if (typeof s.raised !== "number") return;
+      raised = (cfg.raised || 0) + s.raised;
+      showMilestones();
+      if (s.updated) $("raised-note").textContent = "Updated " + new Date(s.updated).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) + " from GitHub Sponsors: one-time sponsorships plus current monthly pledges.";
+    })
+    .catch(function () { /* no sponsors.json yet: the typed-in amount is shown */ });
 
   // donation buttons
   var buttons = $("donate-buttons"), shown = 0;
   cfg.donate.forEach(function (d) {
     if (!d.url) return;
+    if (d.iframe) {   // GitHub's own Sponsor button
+      var f = document.createElement("iframe");
+      f.src = d.iframe;
+      f.title = "Sponsor ignzio";
+      f.height = "32";
+      f.width = "114";
+      f.style.cssText = "border: 0; border-radius: 6px;";
+      buttons.appendChild(f);
+      ++shown;
+      return;
+    }
     var a = document.createElement("a");
     a.className = "btn big";
     a.href = d.url;
