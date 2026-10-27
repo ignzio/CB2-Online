@@ -167,6 +167,12 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
             for (const auto& e : row->endpoints) options.seeds.push_back(cb2net::endpointText(e));
             options.joinViaDirectory = true;
         }
+        // Phone hotspots and many mobile / office networks cannot be reached directly (carrier-grade or symmetric NAT); only a relay gets players through. With no relay
+        // configured, use a dedicated server from the directory's list: it is introduced and relays, and the room announces it so the others use the same one.
+        if (!localMode && options.rendezvous.empty()) {
+            const auto servers = dirBrowse.servers();
+            if (!servers.empty()) options.rendezvous = servers.front().text;
+        }
         room = options.room;
         std::string err;
         if (mp.start(options, err)) { browser.close(); dirBrowse.stop(); screen = Screen::Waiting; stagingSince = seconds(); message.clear(); }

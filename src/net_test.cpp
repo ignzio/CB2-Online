@@ -10,6 +10,12 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#endif
 #include "net.hpp"
 #include "directory.hpp"
 
@@ -347,6 +353,61 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
         check(gone, "the room disappears from the list once everybody has left");
+    }
+
+    std::printf("1d. security: the hash, forged packets, stolen ids\n");
+    {
+        using namespace cb2net;
+        detail::Sha256 s;
+        s.update("abc", 3);
+        uint8_t d[32];
+        s.finish(d);
+        static const uint8_t expect[8] = {0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea};
+        check(std::memcmp(d, expect, 8) == 0, "SHA-256 gives the standard answer for \"abc\"");
+        check(passwordVerifier(passwordKey("R", "x")) != passwordKey("R", "x") && passwordKey("R", "x") != passwordKey("R", "y") && passwordKey("r ", "x") == passwordKey("R", "x"), "keys depend on the password, ignore case and spaces of the room, and the verifier is not the key");
+        Player a, b;
+        a.open("ANNA", "SEC" + tag, ""); b.open("BEN", "SEC" + tag, "");
+        a.x = 500;
+        run({&a, &b}, 6, [&] { return a.sees("BEN") && b.sees("ANNA"); });
+        // somebody else sends packets with ANNA's id from another address: BEN must keep ANNA's real state
+        SOCKET raw = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        PlayerState fake;
+        std::strncpy(fake.name, "ANNA", cb2net::kNameLength - 1);
+        fake.pos[0] = 99999;
+        fake.level = 0x1E;
+        auto forged = encodeState(cb2net::roomHash("SEC" + tag), a.s->id(), fake);
+        stampPacket(forged, 0, 0);
+        const double t0 = nowSeconds();
+        while (nowSeconds() - t0 < 2) {
+            for (int i = 0; i < 10; ++i) {
+                sockaddr_in to{};
+                to.sin_family = AF_INET;
+                to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                to.sin_port = htons(uint16_t(7777 + i));
+                sendto(raw, reinterpret_cast<const char*>(forged.data()), int(forged.size()), 0, reinterpret_cast<sockaddr*>(&to), sizeof to);
+            }
+            a.tick(); b.tick();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        closesocket(raw);
+        check(b.state("ANNA") && b.state("ANNA")->pos[0] == 500, "a packet that uses ANNA's id from another address does not change her");
+        // a flood of made-up players cannot freeze or fill the game
+        SOCKET flood = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        for (uint32_t u = 1; u <= 400; ++u) {
+            auto p = encodeState(cb2net::roomHash("SEC" + tag), 0x1000 + u, fake);
+            stampPacket(p, 0, 0);
+            for (int i = 0; i < 10; ++i) {
+                sockaddr_in to{};
+                to.sin_family = AF_INET;
+                to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                to.sin_port = htons(uint16_t(7777 + i));
+                sendto(flood, reinterpret_cast<const char*>(p.data()), int(p.size()), 0, reinterpret_cast<sockaddr*>(&to), sizeof to);
+            }
+        }
+        closesocket(flood);
+        const double tf = run({&a, &b}, 1, [] { return false; });
+        (void)tf;
+        check(b.s->others().size() <= cb2net::kMaxPlayers && b.sees("ANNA"), "400 made-up players do not hang the game and do not push the real one out");
     }
 
     std::printf("1c. room passwords and the two releases (this PC / LAN)\n");

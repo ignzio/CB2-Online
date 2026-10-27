@@ -163,8 +163,13 @@ void DirectoryClient::stop() {
     running = false;
     wake();
     if (worker.joinable()) worker.join();
-    std::lock_guard<std::mutex> l(mu);
-    memberSet = joinPending = false;
+    std::string leaveBody;
+    {
+        std::lock_guard<std::mutex> l(mu);
+        if (memberSet && !mRoom.empty() && mPort) leaveBody = "{\"room\":\"" + mRoom + "\",\"port\":" + std::to_string(mPort) + ",\"ip\":\"" + mIp + "\",\"region\":\"" + regionText(localRegion()) + "\"}";
+        memberSet = joinPending = false;
+    }
+    if (!leaveBody.empty()) { Response r; http("POST", "/leave", leaveBody, r); }   // the room's count drops at once instead of after the entry expires
 }
 
 void DirectoryClient::setMember(const std::string& room, uint32_t uid, const std::string& name, const std::string& ip, uint16_t port, const std::string& rendezvous, bool locked) {

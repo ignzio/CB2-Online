@@ -30,7 +30,9 @@ GET  /health    -> OK
 - `locked` is `true` when the room asks for a password. It is only a hint for the list: the password never reaches the service.
 - `ip` in a request is the sender's public IPv4 address as STUN saw it; a service should prefer the address it observes on the connection
   and only use the reported one when the request came over IPv6. A service must only accept public addresses.
-- Entries are soft state: forget a member or server about 45 s after its last announcement, a pending joiner after 30 s.
+- Entries are soft state: forget a member or server about 45 s after its last announcement, a pending joiner after 30 s. A member is identified by its room (and region) and its address, so a player who leaves and comes back replaces
+  its old entry instead of being counted twice; `POST /leave {"room","port","ip","region"}` removes the caller's own membership at once (only the caller's own address can be removed).
+- Order servers by how long they have been announcing (not by the player count they claim), limit entries per caller (an IPv6 /64 is one caller) and rate-limit per caller.
 - Validate everything (names are 1-15 of `A-Za-z0-9 _.-`, ports 1024-65535), strip control characters from anything echoed back,
   rate-limit per address, and cap the number of entries.
 

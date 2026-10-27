@@ -64,12 +64,31 @@ introduced until it is back, and a relayed pair loses its path.
 *Create a room* asks for a name and then an optional password. A locked room shows a padlock in the list and asks for the password when you join. Wrong or missing
 password: the lobby returns with **WRONG PASSWORD** (or, if you were creating the room and the name is taken on the server with another password, a hint to pick another).
 
-What happens on the wire (`src/netproto.hpp`): the password never travels. Together with the room name it becomes a 64-bit key; every packet of a locked room carries a
-32-bit tag that only somebody with the key can compute, and players drop packets with a wrong tag (and answer with a "denied" packet, at most once every 2 s per address).
-The rendezvous server is given a one-way image of the key (the *verifier*) by whoever opens the room, and only lets players in whose verifier matches; the tag also rides along in
-relayed packets, so a stranger cannot inject packets through the relay. The lobby directory is only told *that* a room is locked, for the padlock.
-This keeps unwanted players out of a room. It is **not encryption**: somebody who can read your network traffic can read your Crash's position, and a short password can be
-guessed offline by anybody who captured a tag. Use a password you do not use anywhere else.
+What happens on the wire (`src/netproto.hpp`): the password never travels. Together with the room name (the salt) it becomes a 64-bit key through 20000 rounds of SHA-256 (so every
+guess of a password is costly). Every state packet of a locked room carries a 32-bit tag, the SHA-256 of the key, the room, the sender and the **contents of the state**: a stranger
+cannot make a packet that is accepted, and a captured tag is useless with other contents. Players drop packets with a wrong tag (and answer "denied", at most once every 2 s per address).
+The rendezvous server is given a SHA-256 image of the key (the *verifier*) by whoever opens the room and only lets players in whose verifier matches; the key cannot be computed from it, and the tag
+rides along in relayed packets. The lobby directory is only told *that* a room is locked, for the padlock.
+This keeps unwanted players out of a room. It is **not encryption**: somebody who can read your network traffic can read your Crash's position and can replay an exact copy of a packet they captured,
+and a short password can be guessed offline by anybody who captured a verifier or a tag. Use a password you do not use anywhere else. A server can also be occupied by a stranger who registers a room
+name before you do (with another password): pick another name, or run your own server.
+
+## Security notes
+
+What the networking code does about hostile input (reviewed in v0.8.1; see `src/net.cpp`, `src/server.cpp`, `worker/src/directory.js`):
+
+- **Decoders** check exact packet sizes and counts, names are cleaned; nothing from the network indexes memory unchecked. The state of other players is only ever written into the emulated console's
+  memory, never the host's.
+- **Forged players.** A player is tied to the address it first spoke from, so a packet that only uses somebody's id (ids are public) cannot steal them or redirect our packets; at most 32 players are
+  accepted, so a flood of made-up ids cannot freeze the game.
+- **Aiming our traffic at somebody (reflection).** The server drops the "private address" a registrant claims unless it really is a private address, and players only send to a private address on
+  their own network and to public addresses that are plausible (never 0.x, multicast, or loopback unless the server is on this PC). The server answers an address at most 24 times a second and refuses
+  a registration for the id of a living member from another address.
+- **Directory.** Servers are listed oldest first (the player count they claim is not trusted), a caller (an IPv6 /64 counts as one) may have 16 rooms and 2 servers, the per-caller rate limit applies per /64.
+  The address a client reports is only used for callers that reach the directory over IPv6; it cannot be verified there, which limits what a malicious caller can do to the few packets a join generates.
+- **Relay server choice.** With no `rendezvous` set, the game relays through the directory's longest-listed server (this is what lets players on phone hotspots and other strict networks connect). The server
+  sees the players' addresses and relayed positions, like the directory does; set `rendezvous =` to a server you trust to avoid it.
+- **Updates** come over HTTPS only and are checked against the SHA-256 GitHub lists for the release; there is no code signature, so a compromised release account is a compromised update.
 
 ## The two releases
 
@@ -138,7 +157,7 @@ control Crash.
   silent for 10 s (a crash, a cable; long enough that a slow level load on someone's PC does not make everyone delete and re-create
   their Crash) disappears anyway. While you are in a menu or a loading screen you still announce your name, so
   the others do not keep drawing your old position. The state packet also carries the run data of [SPEEDRUN.md](SPEEDRUN.md)
-  (protocol version 3: older clients do not see this one; the format changed for passwords and the two releases).
+  (protocol version 4: older clients do not see this one).
 - **Loading safety.** Creating or deleting a puppet while the game streams a level from the disc is postponed until the disc is idle
   (at most 5 s), every engine call the module makes has an instruction budget, and a call that fails is rolled back and retried later, so
   a problem with a puppet can no longer take the game down.

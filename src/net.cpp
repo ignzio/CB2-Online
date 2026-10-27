@@ -162,7 +162,10 @@ bool Session::start(const SessionOptions& options, std::string& error) {
 void Session::sendTo(const Endpoint& to, const std::vector<uint8_t>& packet) {
     if (!active() || !to.valid()) return;
     std::vector<uint8_t> data = packet;
-    stampPacket(data, localRegion(), authTag(key, roomId, uid));
+    uint32_t auth = 0;   // the tag covers the state itself (netproto.hpp), so it is made per packet
+    if (data.size() == kHeaderSize + kEntrySize && data[4] == kState) auth = stateTag(key, roomId, uid, &data[kHeaderSize], kEntrySize);
+    else if (data.size() == kHeaderSize + 4 + kEntrySize && data[4] == kRelay) auth = stateTag(key, roomId, uid, &data[kHeaderSize + 4], kEntrySize);
+    stampPacket(data, localRegion(), auth);
     sockaddr_in a{};
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = to.ip;
@@ -269,9 +272,14 @@ void Session::receive() {
         switch (h.type) {
         case kState: {
             if (h.uid == uid || fromServer) break;   // our own broadcast coming back
-            if (h.auth != authTag(key, roomId, h.uid)) { refuse(e); break; }   // wrong or missing password
             PlayerState s;
             if (!decodeState(buf, size_t(n), s)) break;
+            if (h.auth != stateTag(key, roomId, h.uid, buf + kHeaderSize, kEntrySize)) { refuse(e); break; }   // wrong or missing password
+            {   // a player is tied to the address it first spoke from: a packet that merely uses somebody's id (ids are public) must not steal them
+                const auto known = peers.find(h.uid);
+                if (known != peers.end()) { if (known->second.chosen.valid() && !(known->second.chosen == e) && now - known->second.lastDirect < 2.0 * kDirectFresh) break; }
+                else if (peers.size() >= kMaxPlayers) break;   // never more players than a room can hold
+            }
             Peer& p = peerFor(h.uid, s.name);
             s.id = p.state.id;
             p.state = s;
@@ -281,9 +289,11 @@ void Session::receive() {
             break;
         }
         case kRelayed: {
-            if (!fromServer || h.auth != authTag(key, roomId, h.uid)) break;
+            if (!fromServer) break;
             PlayerState s;
             if (!decodeState(buf, size_t(n), s)) break;
+            if (h.auth != stateTag(key, roomId, h.uid, buf + kHeaderSize, kEntrySize)) break;
+            if (!peers.count(h.uid) && peers.size() >= kMaxPlayers) break;
             Peer& p = peerFor(h.uid, s.name);
             s.id = p.state.id;
             p.state = s;
@@ -306,10 +316,17 @@ void Session::receive() {
             lastServerAnswer = now;
             for (const PeerInfo& info : list) {
                 if (info.uid == uid || info.uid == 0) continue;
+                if (!peers.count(info.uid) && peers.size() >= kMaxPlayers) continue;
+                // The list comes from the server, which only relays what its registrants claim, so an address in it is checked before we send anything to it: a forged entry
+                // must not turn our 30 packets a second into an attack on somebody (or on a port of our own PC).
+                const bool serverLocal = server.valid() && (server.ip & 0xFF) == 127;
+                const bool lanOk = info.priv.valid() && privateIp(info.priv.ip) && priv.ip && std::memcmp(&info.priv.ip, &priv.ip, 2) == 0;   // same network (same first two bytes)
+                const bool pubOk = info.pub.valid() && routableIp(info.pub.ip) && ((info.pub.ip & 0xFF) != 127 || serverLocal);
+                if (!lanOk && !pubOk) continue;
                 Peer& p = peerFor(info.uid, info.name);
                 p.candidates.clear();
-                if (info.priv.valid() && info.priv.ip) p.candidates.push_back(info.priv);   // same network: the private address works
-                if (info.pub.valid()) p.candidates.push_back(info.pub);
+                if (lanOk) p.candidates.push_back(info.priv);   // same network: the private address works
+                if (pubOk) p.candidates.push_back(info.pub);
             }
             break;
         }

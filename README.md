@@ -23,7 +23,7 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 - **No host, no port forwarding, no addresses to type.** Players in a room find each other on the same PC or network automatically, or through a
   rendezvous server on the internet; they can leave and come back at any time.
 - **Online lobby** before the game: play offline, play on your network, or play online; your name; a public list of open rooms and servers.
-- **Rooms with a password:** the person who creates a room can set one (a padlock shows in the list); only players who know it can join. It keeps unwanted players out; it does not encrypt the game traffic ([docs/ONLINE.md](docs/ONLINE.md)).
+- **Rooms with a password:** the person who creates a room can set one (a padlock shows in the list); only players who know it can join. It keeps unwanted players out; it does not encrypt the game traffic ([docs/ONLINE.md](docs/ONLINE.md), which also lists what the networking does against hostile input).
 - **Player list** at the right edge: who is online, which level each one is in, how long they have been in it, their best time and latest finish (`F3`).
 - **Notices** when somebody joins or leaves the room, enters or leaves a level, finishes a level or runs out of lives.
 - **Opacity slider** for the other players' Crashes (10-100%), so they do not block your view.

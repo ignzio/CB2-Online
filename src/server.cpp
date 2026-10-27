@@ -185,6 +185,8 @@ int main(int argc, char** argv) {
     std::unordered_map<uint64_t, Room> rooms;
     double lastSweep = 0, lastStats = 0, lastAnnounce = -1e9;
     std::unordered_map<uint64_t, double> deniedAt;
+    struct Bucket { double start = 0; int count = 0; };
+    std::unordered_map<uint32_t, Bucket> answers;   // per source address: how many answers it got in this second
     unsigned long long relayed = 0, registered = 0;
 
     auto sendTo = [&](const Endpoint& to, std::vector<uint8_t> data, uint8_t region = 0, uint32_t auth = 0) {
@@ -254,6 +256,13 @@ int main(int argc, char** argv) {
                         log("room \"%s\" opened%s%s", r.roomName, r.verifier ? " (password)" : "", "");
                     }
                     Room& room = roomIt->second;
+                    {   // The source address of a UDP packet can be forged, and an answer is bigger than a registration: no address gets more than a few answers a second,
+                        // so that the server cannot be used to flood somebody with forged registrations from his address.
+                        Bucket& b = answers[src.ip];
+                        if (now - b.start >= 1.0) { b.start = now; b.count = 0; }
+                        if (++b.count > 24) continue;
+                        if (answers.size() > 8192) answers.clear();
+                    }
                     if (room.verifier != r.verifier) {   // wrong or missing password: not a member, and told so
                         double& last = deniedAt[src.key()];   // at most one refusal per address and half a second
                         if (now - last >= 0.5) { last = now; sendTo(src, encodeDenied(h.room, h.uid), h.region); }
@@ -270,11 +279,17 @@ int main(int argc, char** argv) {
                         log("%s joined room \"%s\" from %s", r.name, r.roomName, endpointText(src));
                     }
                     Member& m = mit->second;
+                    // A member's id is public (it is in every packet), so a registration for an existing member from another address is not accepted while the member is alive:
+                    // otherwise anybody could redirect the relayed packets and the introductions of another player to himself.
+                    if (!(m.pub == src) && now - m.lastSeen <= kMemberTimeout && m.pub.valid()) continue;
                     if (now - m.lastRegister < 0.3) continue;   // flood protection: one answer per member and 0.3 s
                     m.lastRegister = now;
                     m.lastSeen = now;
                     m.pub = src;
                     m.priv = r.priv;
+                    // The private address is only ever used by players on the same network as the member: whatever else is claimed (a victim's public address, a multicast address)
+                    // would be handed to every player of the room, so it is dropped.
+                    if (!privateIp(m.priv.ip) || !m.priv.port) m.priv = Endpoint{};
                     std::memcpy(m.name, r.name, kNameLength);
                     ++registered;
                     std::vector<PeerInfo> others;

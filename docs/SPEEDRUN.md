@@ -34,7 +34,7 @@ survives updates; copy it to keep your times. A damaged line is skipped without 
 
 ## What the others see
 
-Each player's state packet (protocol version 3, `src/netproto.hpp`) carries their **personal best for the level they are in**, and their
+Each player's state packet (protocol version 4, `src/netproto.hpp`) carries their **personal best for the level they are in**, and their
 **latest run** (level, time, finished or not) with a counter that goes up with every run. In a room:
 
 - the **player list** (right edge, `F3`) shows for each player the level, the time since they entered it, `PB m:ss.t` (their best there) and
