@@ -77,6 +77,9 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 
 The folder holds your own game files, so keep it for yourself; the release zip itself never contains them.
 
+**Windows Defender / SmartScreen warns about `Crash2.exe`?** The program is new and not yet code signed, which these tools are suspicious of. *More info -> Run anyway* starts it; you can compare
+`Get-FileHash Crash2.exe` with the SHA-256 GitHub shows next to the release file, and the full source is in this repository. See [docs/RELEASING.md](docs/RELEASING.md#code-signing).
+
 ```
 Crash2.exe            the game
 data\                 your American game files (SCUS_941.54, SYSTEM.CNF, S0..S3), found automatically

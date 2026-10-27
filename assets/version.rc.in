@@ -1,0 +1,29 @@
+#include <winver.h>
+
+// Generated from this template by CMake (the numbers come from the VERSION file): what Explorer's Properties dialog, Windows security prompts and virus scanners read.
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @CB2_VER_COMMA@
+PRODUCTVERSION @CB2_VER_COMMA@
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "CB2-Online (open source)"
+            VALUE "FileDescription", "@CB2_RC_DESCRIPTION@"
+            VALUE "FileVersion", "@CB2_VERSION@"
+            VALUE "InternalName", "@CB2_RC_INTERNAL@"
+            VALUE "LegalCopyright", "MIT License. Fan project, not affiliated with the owners of Crash Bandicoot."
+            VALUE "OriginalFilename", "@CB2_RC_ORIGINAL@"
+            VALUE "ProductName", "CB2-Online"
+            VALUE "ProductVersion", "@CB2_VERSION@"
+            VALUE "Comments", "Source code: https://github.com/ignzio/CB2-Online"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

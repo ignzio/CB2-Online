@@ -1,5 +1,6 @@
 param(
     [switch]$Publish,
+    [switch]$RequireSign,   # stop if no code-signing certificate is configured (see docs/RELEASING.md, "Code signing")
     [string]$Notes = "",
     [string]$Repo = "ignzio/CB2-Online"
 )
@@ -24,8 +25,48 @@ $pack = Join-Path $out "CB2-Online-$tag"
 New-Item -ItemType Directory -Force (Join-Path $pack "data") | Out-Null
 Copy-Item $player (Join-Path $out "Crash2.exe")
 Copy-Item $server (Join-Path $out "Crash2-Server.exe")
-Copy-Item $player (Join-Path $pack "Crash2.exe")
-Copy-Item $server (Join-Path $pack "Crash2 Server.exe")
+
+# ---- code signing (optional but recommended: unsigned programs are what Windows Defender / SmartScreen warn about) -------------------------------------------------------------
+# Configure ONE of these in the environment (nothing secret is ever stored in the repository):
+#   CB2_SIGN_PFX [+ CB2_SIGN_PFX_PASSWORD]         a .pfx certificate file
+#   CB2_SIGN_THUMBPRINT                            a certificate in the Windows store (also a hardware token / EV key)
+#   CB2_SIGN_AZURE_DLIB + CB2_SIGN_AZURE_METADATA  Azure Artifact Signing (formerly Trusted Signing): the Azure.CodeSigning.Dlib.dll and the metadata .json
+# CB2_SIGN_TIMESTAMP overrides the timestamp server. The signed files are what the updater's SHA-256 check is made against, so sign BEFORE uploading (this script does).
+function Find-SignTool {
+    $c = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*\x64\*" } | Sort-Object FullName -Descending | Select-Object -First 1
+    if ($c) { return $c.FullName }
+    return $null
+}
+$signMode = if ($env:CB2_SIGN_AZURE_DLIB -and $env:CB2_SIGN_AZURE_METADATA) { "azure" } elseif ($env:CB2_SIGN_PFX) { "pfx" } elseif ($env:CB2_SIGN_THUMBPRINT) { "store" } else { "" }
+$signed = $false
+if ($signMode) {
+    $signtool = Find-SignTool
+    if (-not $signtool) { throw "signtool.exe not found (install the Windows SDK, or Visual Studio's Windows 10/11 SDK component)" }
+    $ts = if ($env:CB2_SIGN_TIMESTAMP) { $env:CB2_SIGN_TIMESTAMP } elseif ($signMode -eq "azure") { "http://timestamp.acs.microsoft.com" } else { "http://timestamp.digicert.com" }
+    foreach ($name in "Crash2.exe", "Crash2-Server.exe") {
+        $file = Join-Path $out $name
+        $signArgs = @("sign", "/fd", "SHA256", "/d", "CB2-Online", "/du", "https://github.com/$Repo")
+        if ($signMode -eq "azure") { $signArgs += @("/tr", $ts, "/td", "SHA256", "/dlib", $env:CB2_SIGN_AZURE_DLIB, "/dmdf", $env:CB2_SIGN_AZURE_METADATA) }
+        else {
+            $signArgs += @("/tr", $ts, "/td", "SHA256")
+            if ($signMode -eq "pfx") { $signArgs += @("/f", $env:CB2_SIGN_PFX); if ($env:CB2_SIGN_PFX_PASSWORD) { $signArgs += @("/p", $env:CB2_SIGN_PFX_PASSWORD) } }
+            else { $signArgs += @("/sha1", $env:CB2_SIGN_THUMBPRINT) }
+        }
+        & $signtool @signArgs $file
+        if ($LASTEXITCODE -ne 0) { throw "signing $name failed" }
+        $sig = Get-AuthenticodeSignature $file
+        $ok = $sig.SignerCertificate -and ($sig.Status -eq "Valid" -or ($env:CB2_SIGN_ALLOW_UNTRUSTED -eq "1" -and $sig.Status -eq "UnknownError") -or ($env:CB2_SIGN_ALLOW_UNTRUSTED -eq "1" -and $sig.Status -eq "NotTrusted"))
+        if (-not $ok) { throw "the signature of $name does not verify: $($sig.Status) $($sig.StatusMessage)" }
+        "signed $name by $($sig.SignerCertificate.Subject)"
+    }
+    $signed = $true
+} elseif ($RequireSign) {
+    throw "-RequireSign: no code-signing certificate configured (CB2_SIGN_PFX, CB2_SIGN_THUMBPRINT or CB2_SIGN_AZURE_DLIB + CB2_SIGN_AZURE_METADATA)"
+} else {
+    Write-Warning "These programs are NOT code signed: Windows Defender / SmartScreen may warn about or block them. See docs/RELEASING.md, 'Code signing'."
+}
+Copy-Item (Join-Path $out "Crash2.exe") (Join-Path $pack "Crash2.exe")
+Copy-Item (Join-Path $out "Crash2-Server.exe") (Join-Path $pack "Crash2 Server.exe")
 Copy-Item (Join-Path $root "LICENSE") $pack -ErrorAction SilentlyContinue
 Set-Content (Join-Path $pack "FONT-LICENSE.txt") -Encoding ascii -Value "The online menu uses the font Crash-a-Like by Aryel Filipe (https://www.dafont.com/crash-a-like.font), listed on dafont.com as 100% Free."
 Set-Content (Join-Path $pack "data\GAME FILES GO HERE.txt") -Encoding ascii -Value @"
