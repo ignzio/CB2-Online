@@ -1,6 +1,8 @@
 #pragma once
 // Settings file (cb2.cfg): where the user's game data lives and how to run. Lines are `key = value`, `#` starts a comment.
-//   game    = D:\Games\Crash2          folder with SCUS_941.54 and the S0..S3 level folders (read-only)
+//   game    = D:\Games\Crash2          folder with SCUS_941.54 (NTSC-U) and the S0..S3 level folders (read-only); default: data
+//   game_pal = D:\Games\Crash2-pal     the same for the European (PAL) release: folder with SCES_009.67 and S0..S3; default: data-pal
+//   region  = auto                     which release to play when both are installed: auto (PAL first), pal or ntsc. Online rooms are per release (a PAL and an NTSC player never share one)
 //   mod     = mods\myhack              overlay folder, may be repeated; later ones win
 //   card    = saves\memcard0.mcr       memory card image
 //   scale   = 4                        internal resolution multiplier of the OpenGL renderer
@@ -35,10 +37,17 @@
 #include <cstdint>
 #include <vector>
 
+#include "game_profile.hpp"
+
 namespace cb2 {
 
 struct Config {
-    std::string game;
+    std::string game, gamePal;   // the game folders of the NTSC-U and the PAL release; after resolvePaths(): `game` is the folder that will be played
+    std::string region = "auto";   // auto / pal / ntsc
+    bool gameFromCommandLine = false;   // --game was given: only that folder is used
+    const cb2game::Profile* profile = nullptr;   // the release that resolvePaths() chose (nullptr: none installed)
+    bool havePal = false, haveNtsc = false;     // which releases are installed (after resolvePaths)
+    std::string ntscFolder, palFolder;           // where they are
     std::vector<std::string> mods;
     std::string card = "memcard0.mcr";
     int scale = 4;
@@ -76,7 +85,7 @@ struct Config {
     // Returns true when a file was read. `exeDir` is searched after the working directory.
     bool load(const std::string& exeDir);
     bool save(const std::string& path) const;
-    // Checks that the game folder holds the executable; returns an error text or an empty string.
+    // Checks that a game folder with an executable was found; returns an error text or an empty string.
     std::string validate() const;
     // Finds the game folder: a relative `game` is also tried next to the executable, and an empty one falls back to
     // <exeDir>\data (the layout of the packaged game folder).

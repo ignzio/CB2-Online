@@ -14,17 +14,20 @@ The service only ever carries the list and the introductions, never game data: t
 All answers are `text/plain`, one record per line, fields separated by a tab. `ip:port` is an IPv4 address and UDP port.
 
 ```
-POST /announce  {"kind":"member","room","uid","name","port","ip","version","rendezvous"}   every ~5 s while a player is in a room
+POST /announce  {"kind":"member","room","uid","name","port","ip","version","region","locked","rendezvous"}   every ~5 s while a player is in a room
                 -> OK, then  J<TAB>ip:port  for every player who asked to join and has not been answered yet
 POST /announce  {"kind":"server","name","port","players","version"}                        every 15 s from a dedicated server
-POST /join      {"room","port","ip","version"}                                             a player who wants into a room
+POST /join      {"room","port","ip","version","region"}                                    a player who wants into a room
                 -> OK, then  E<TAB>ip:port  for every member of the room
-GET  /rooms?version=1
-                -> R<TAB>room<TAB>players<TAB>ip:port,ip:port<TAB>version<TAB>rendezvous    one per room
+GET  /rooms?version=3&region=p
+                -> R<TAB>room<TAB>players<TAB>ip:port,ip:port<TAB>version<TAB>rendezvous<TAB>locked    one per room (locked: 0 or 1)
                    S<TAB>name<TAB>players<TAB>ip:port<TAB>version                            one per dedicated server
 GET  /health    -> OK
 ```
 
+- `region` is `u` (the American release) or `p` (the European one; anything else counts as `u`). A room is identified by its region and name: the two releases cannot play together, so a service
+  keeps them apart (`/join` answers with the members of the joiner's region, `/rooms` lists the asker's region). Dedicated servers serve both regions and are listed to everybody.
+- `locked` is `true` when the room asks for a password. It is only a hint for the list: the password never reaches the service.
 - `ip` in a request is the sender's public IPv4 address as STUN saw it; a service should prefer the address it observes on the connection
   and only use the reported one when the request came over IPv6. A service must only accept public addresses.
 - Entries are soft state: forget a member or server about 45 s after its last announcement, a pending joiner after 30 s.

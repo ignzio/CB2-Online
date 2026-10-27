@@ -35,7 +35,7 @@ added, several `--mod` options stack. `--ram-mb 8|16` gives the engine heap more
 Settings can live in `cb2.cfg` (see `cb2.cfg.example`); command-line options override the file.
 
 Environment switches for diagnosing: `CB2_PERF`, `CB2_PCHIST`, `CB2_FRAMELOG` (speed, see [PERFORMANCE.md](PERFORMANCE.md)), `CB2_SMOOTHLOG` (60 fps smoothing),
-`CB2_RUNLOG` (level timer), `CB2_NOIDLESKIP`, `CB2_NOPRECISE`, `CB2_SOFTRASTER`, `CB2_NOINPUT` (scripted runs ignore the real keyboard and game pad; automatic with a capture or a hidden window), `CB2_FAKEHZ`/`CB2_CONTINUOUS` (high refresh rate test), `CB2_PERSPECTIVE`/`CB2_WIDESCREEN`/`CB2_NATIVEWORLD` (force the Graphics options), `CB2_NWLOG` (native world: camera search and matching statistics), `CB2_SESSION` (record the scenery projections of a play session), `CB2_GTEDUMP`/`CB2_GTEDUMPCSV`/`CB2_REGPC`/`CB2_REGLOG`/`CB2_FINDWORD`/`CB2_PEEK` (GTE and memory research tools), `CB2_DISCSPEED` (disc speed-up, overrides `disc_speed`), `CB2_WAV` (record the sound), `CB2_HWSUMMARY` (at exit: which CD and SPU features the game really used - XA, CD-DA, reverb, noise, pitch modulation).
+`CB2_RUNLOG` (level timer), `CB2_NOIDLESKIP`, `CB2_NOPRECISE`, `CB2_SOFTRASTER`, `CB2_NOINPUT` (scripted runs ignore the real keyboard and game pad; automatic with a capture or a hidden window), `CB2_FAKEHZ`/`CB2_CONTINUOUS` (high refresh rate test), `CB2_PERSPECTIVE`/`CB2_WIDESCREEN`/`CB2_NATIVEWORLD` (force the Graphics options), `CB2_NWLOG` (native world: camera search and matching statistics), `CB2_SESSION` (record the scenery projections of a play session), `CB2_GTEDUMP`/`CB2_GTEDUMPCSV`/`CB2_REGPC`/`CB2_REGLOG`/`CB2_FINDWORD`/`CB2_PEEK` (GTE and memory research tools), `CB2_DISCSPEED` (disc speed-up, overrides `disc_speed`), `CB2_WAV` (record the sound), `CB2_STEPDUMP` (`cb2_boot`: dump every instruction around a given pc, for hangs), `CB2_HOLD_PAL` (`cb2_nettest --hold`: the demo players use the European release), `CB2_HWSUMMARY` (at exit: which CD and SPU features the game really used - XA, CD-DA, reverb, noise, pitch modulation).
 
 ## Other tools
 
@@ -47,6 +47,7 @@ build\Release\cb2_roundtrip.exe <folder>   # NSF/NSD writer round trip, exits no
 build\Release\cb2_gtetest.exe analysis\gte\tests.bin    # GTE vs real-hardware captures (tools\gte_tests_convert.py)
 build\Release\cb2_memtest.exe              # memory card filesystem self-test
 build\Release\cb2_vmdiff.exe <SCUS_941.54> [cases] [seed]   # GOOL VM vs the game's own interpreter
+python tools\pal_map.py SCUS_941.54 SCES_009.67 [hexaddr ...]  # maps American engine addresses to the European executable (docs/REGIONS.md)
 build\Release\cb2_mod_demo.exe <level.NSF> <out folder>     # example mod (see MODDING.md)
 build\Release\cb2_gool.exe  list|dump|patch|test ...        # GOOL assembler / script patcher (EDITING.md)
 build\Release\cb2_scene.exe list|export|import|test ...     # scenery <-> OBJ editor pipeline (EDITING.md)

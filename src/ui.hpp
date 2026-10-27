@@ -141,6 +141,20 @@ inline void plank(Canvas& c, float x, float y, float w, float h, bool selected) 
 inline const Rgb kGold1 = rgb(255, 226, 90), kGold2 = rgb(255, 140, 24), kWhite1 = rgb(246, 244, 236), kWhite2 = rgb(200, 196, 188);
 inline const Rgb kTeal = rgb(128, 232, 255), kDim = rgb(170, 190, 200), kGreen = rgb(130, 255, 150), kRed = rgb(255, 120, 96);
 
+// A padlock (x, y = its top left corner; 16 wide, 20 high): marks rooms that ask for a password.
+inline void lockIcon(Canvas& c, float x, float y, Rgb colour) {
+    const Rgb dark = rgb(20, 10, 4);
+    c.rect(x + 1, y - 1, 14, 9, dark);
+    c.rect(x + 3, y, 3, 10, dark);
+    c.rect(x + 10, y, 3, 10, dark);
+    c.rect(x + 4, y, 2, 10, colour);
+    c.rect(x + 10, y, 2, 10, colour);
+    c.rect(x + 4, y, 8, 2, colour);
+    c.rect(x - 1, y + 8, 18, 13, dark);
+    c.rect(x, y + 9, 16, 11, colour);
+    c.rect(x + 7, y + 12, 2, 5, dark);
+}
+
 inline void title(Canvas& c, const std::string& sub) {
     c.centred("CRASH BANDICOOT 2", 30, 60, kGold1, kGold2);
     c.centred(sub, 98, 30, kTeal);

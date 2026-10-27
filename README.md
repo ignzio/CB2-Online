@@ -7,7 +7,7 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 <p align="center"><img src="docs/img/multiplayer.gif" alt="Four players in Snow Go" width="640"></p>
 
 > **You need your own copy of the game.** CB2-Online contains no game data: on the first start it asks for **your own disc image** of Crash Bandicoot 2
-> (NTSC-U, `SCUS_941.54`) and copies the files it needs. See [Install](#install) and [NOTICE.md](NOTICE.md).
+> (European PAL, `SCES_009.67`, or American NTSC-U, `SCUS_941.54`) and copies the files it needs. See [Install](#install) and [NOTICE.md](NOTICE.md).
 
 **Contents:** [Features](#features) · [Install](#install) · [Playing online](#playing-online) · [Controls](#controls) · [In-game menu](#in-game-menu) ·
 [Level times and records](#level-times-and-records) · [Graphics and speed](#graphics-and-speed) · [Save states](#save-states) · [Settings](#settings-cb2cfg) ·
@@ -15,18 +15,22 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 
 ## Features
 
+**Both releases**
+- The **European (PAL)** and the **American (NTSC-U)** release both run, at their own speed (50 Hz and 59.94 Hz), with their own records and save states. With both installed the game starts the PAL one (`region` in `cb2.cfg`). Players of the two releases play in separate rooms: their game data differs. See [docs/REGIONS.md](docs/REGIONS.md).
+
 **Multiplayer**
 - Play with friends in the **same level at the same time**: every other player is a real Crash in your game, with animation, position and a floating name tag.
 - **No host, no port forwarding, no addresses to type.** Players in a room find each other on the same PC or network automatically, or through a
   rendezvous server on the internet; they can leave and come back at any time.
 - **Online lobby** before the game: play offline, play on your network, or play online; your name; a public list of open rooms and servers.
+- **Rooms with a password:** the person who creates a room can set one (a padlock shows in the list); only players who know it can join. It keeps unwanted players out; it does not encrypt the game traffic ([docs/ONLINE.md](docs/ONLINE.md)).
 - **Player list** at the right edge: who is online, which level each one is in, how long they have been in it, their best time and latest finish (`F3`).
 - **Notices** when somebody joins or leaves the room, enters or leaves a level, finishes a level or runs out of lives.
 - **Opacity slider** for the other players' Crashes (10-100%), so they do not block your view.
 - Others are shown, not solid: you do not collide with them or interact. Online, they see you standing still while your menu is open.
 
 **Speedrunning**
-- **Level timer** from the first frame Crash can move until the level ends (`F4`), in the game's own 59.94 Hz time.
+- **Level timer** from the first frame Crash can move until the level ends (`F4`), in the game's own time (59.94 Hz NTSC, 50 Hz PAL).
 - **Personal records** per level, saved in `records.txt`; a *Records* page in the menu; new-best notices.
 - Your best time and latest finish are **shared with the room**. A server-side leaderboard is planned: [SPEEDRUN.md](docs/SPEEDRUN.md).
 - **Save states** (`F5` save, `F9` load, four slots): practise a trick without replaying the cutscenes.
@@ -36,7 +40,7 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 - **OpenGL renderer** at up to 8x the original resolution (default 4x) with unrounded vertex positions, so the geometry does not wobble.
 - **60 fps smoothing** (optional): the game draws 30 pictures per second; this draws the pictures in between.
 - **Smooth textures** (optional): bilinear filtering instead of the blocky texels. **Perspective-correct textures** (optional): no more swimming textures on floors and walls.
-- **Native world** (optional, experimental): the level scenery is drawn by OpenGL straight from the level files, with a depth buffer and perspective-correct textures, instead of from the polygons the console's code projected. It is what makes widescreen show real geometry in the side margins, and it moves the camera exactly for the 60 fps pictures in between. Water and other see-through polygons stay the game's own.
+- **Native world** (optional, **unstable**, *Esc → Settings → Experimental*): the level scenery is drawn by OpenGL straight from the level files, with a depth buffer and perspective-correct textures, instead of from the polygons the console's code projected. It is what makes widescreen show real geometry in the side margins, and it moves the camera exactly for the 60 fps pictures in between. Water and other see-through polygons stay the game's own.
 - **Widescreen** (optional): the picture at your window's aspect ratio (see the limits below).
 - **High refresh rates:** with 60 fps smoothing on a 90+ Hz monitor every refresh shows its own picture (160 Hz = 160 distinct pictures a second).
 - Display filters (nearest / bilinear / sharp bilinear), fullscreen, vsync, 4:3 picture whatever the window shape.
@@ -51,7 +55,7 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 
 **Convenience**
 - **Fast loading:** zones and levels load in a fraction of a second (the emulated disc drive is 16 times faster than the console's; `disc_speed` in `cb2.cfg`).
-- **In-game menu** (`Esc`): sound and picture, online options, records, controls, back to the main menu, quit.
+- **In-game menu** (`Esc`): settings (display, sound and timer, experimental), online options, records, controls, report a bug, back to the main menu, quit; every row says what it does.
 - **Automatic updates** from GitHub Releases, verified by SHA-256; your files and saves are untouched.
 - **Disc importer**: point it at your `.cue` / `.bin` / `.iso` once; it extracts what it needs.
 - Memory card saves in the standard 128 KiB image format (`memcard0.mcr`).
@@ -65,17 +69,18 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 
 1. Download `CB2-Online-v<version>.zip` from the [Releases](../../releases) page and unzip it anywhere.
 2. Run `Play.bat` (or `Crash2.exe`).
-3. **First start only:** the game asks for your disc image. Pick the `.cue` (or `.bin` / `.iso`) of your Crash Bandicoot 2 (NTSC-U) disc; it copies the
-   files it needs into the `data` folder, once. You can also drop the `.cue` / `.iso` on `Crash2.exe`, or run `Crash2.exe --import "path\to\disc.cue"`.
-   Compressed formats (`.chd`, `.pbp`, `.ecm`) are not supported. If you already have the files extracted, copy `SCUS_941.54`, `SYSTEM.CNF` and the
-   `S0` .. `S3` folders into `data` yourself.
+3. **First start only:** the game asks for your disc image. Pick the `.cue` (or `.bin` / `.iso`) of your Crash Bandicoot 2 disc, European or American; it copies the
+   files it needs into the `data-pal` (European) or `data` (American) folder, once. You can import the second release later with `--import`. You can also drop the `.cue` / `.iso` on `Crash2.exe`, or run `Crash2.exe --import "path\to\disc.cue"`.
+   Compressed formats (`.chd`, `.pbp`, `.ecm`) are not supported. If you already have the files extracted, copy `SCES_009.67` (European) or `SCUS_941.54` (American), `SYSTEM.CNF` and the
+   `S0` .. `S3` folders into `data-pal` or `data` yourself.
 4. The lobby opens. Choose **Play Online**, or **Play Offline** to play alone.
 
 The folder holds your own game files, so keep it for yourself; the release zip itself never contains them.
 
 ```
 Crash2.exe            the game
-data\                 your game files (SCUS_941.54, SYSTEM.CNF, S0..S3), found automatically
+data\                 your American game files (SCUS_941.54, SYSTEM.CNF, S0..S3), found automatically
+data-pal\             your European game files (SCES_009.67, ...), if you have that release
 states\               your save states
 cb2.cfg               settings (name, room, server, picture ...)
 memcard0.mcr          your game saves; records.txt: your level records
@@ -89,6 +94,8 @@ Crash2-Server.exe     rendezvous server (no game inside), only needed to host on
 2. Everybody who chose the same room is in your game from then on. To play with specific friends, put the same room name in your `cb2.cfg`
    (`room = MYFRIENDS`) or start with `Crash2.exe --room MYFRIENDS`.
 3. Walk into the same level. You see each other; the player list (`F3`) shows who is where.
+
+**Private rooms:** choose *Create a room*, type a name, then a password (leave it empty for an open room). Locked rooms show a padlock in the list and ask for the password when you join. Rooms are separate for the European and the American release, and the list only shows the rooms of your release.
 
 | Way of playing | When to use it |
 | --- | --- |
@@ -123,13 +130,15 @@ Left-Right or dragging to move a slider, `Esc` / B / right click to go back.
 
 | Page | What is on it |
 | --- | --- |
-| **Sound and picture** | volume, display filter, fullscreen, level timer |
-| **Graphics** | **textures** (sharp / smooth), **perspective** correction, **native world**, **widescreen**, **60 fps smoothing**, vsync |
+| **Settings → Display** | fullscreen, **widescreen**, display filter, **textures** (sharp / smooth), **perspective** correction, **60 fps smoothing**, vsync |
+| **Settings → Sound and timer** | volume, level timer |
+| **Settings → Experimental** | **native world** (marked **UNSTABLE**: it can flicker or miss parts; off is the safe choice) |
 | **Online** | name tags, **opacity of the other players**, the player list |
 | **Records** | your best time and runs per level |
 | **Controls** | keyboard and game pad bindings side by side; `Enter` rebinds, `Del` clears, a key already in use swaps |
 | **Main menu** | leave the room and return to the lobby (progress not saved on the memory card is lost) |
-| **Quit** | close the game |
+| **Report a bug** | opens a GitHub issue with your system and settings filled in |
+| **Quit game** | close the game |
 
 <p align="center"><img src="docs/img/menu-sound.jpg" alt="Sound and picture" width="360"> <img src="docs/img/menu-controls.jpg" alt="Controls" width="360"></p>
 
@@ -152,7 +161,7 @@ All of it, with the reasoning and how to measure it, is in [docs/PERFORMANCE.md]
 
 ## Save states
 
-`F5` saves the whole game (all of the emulated console) into the current slot, `F9` loads it, `F6` switches between slots 1-4. Files: `states\slotN.cb2state`.
+`F5` saves the whole game (all of the emulated console) into the current slot, `F9` loads it, `F6` switches between slots 1-4. Files: `states\slotN.cb2state` (`states\pal-slotN.cb2state` for the European release).
 Useful for practice and for reproducing bugs without replaying the cutscenes. They do not touch your memory card saves, they are not portable between versions that
 change the console emulation, and they only work with the normal (interpreter) engine.
 
@@ -164,8 +173,9 @@ Everything in the menu is remembered in `cb2.cfg` next to `Crash2.exe`; the file
 | --- | --- |
 | `name`, `room` | your name above your Crash; the room you meet people in |
 | `scale` | internal resolution multiplier (1-8) |
-| `volume`, `filter`, `timer` | the *Sound and picture* page |
-| `textures`, `perspective`, `native_world`, `widescreen`, `smooth`, `vsync`, `refresh_rate` | the *Graphics* page (`refresh_rate = 0` uses your monitor's rate) |
+| `game`, `game_pal`, `region` | the American and European game folders; `region = auto` (default) / `pal` / `ntsc` chooses which one to play when both are installed |
+| `volume`, `filter`, `timer` | *Settings → Sound and timer* and *Display* |
+| `textures`, `perspective`, `native_world`, `widescreen`, `smooth`, `vsync`, `refresh_rate` | *Settings → Display* and *Experimental* (`refresh_rate = 0` uses your monitor's rate) |
 | `disc_speed` | how many times faster than the console's drive the game's disc reads are (1-24, default 16) |
 | `nametags`, `opacity`, `roster` | the *Online* page |
 | `key_<button>`, `pad_<button>` | bindings |

@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/cb2_server @PORT@ --quiet
+ExecStart=/usr/local/bin/cb2_server @PORT@ --quiet @ANNOUNCE@
 User=cb2
 Restart=always
 RestartSec=2

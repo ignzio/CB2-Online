@@ -42,22 +42,23 @@ bool PauseMenu::init(Settings* settings, const Context& context) {
 
 void PauseMenu::open() {
     page = Page::Main;
-    sel = mainSel = 0;
+    sel = mainSel = settingsSel = 0;
     message.clear();
     dragging = -1;
 }
 
 void PauseMenu::setPage(Page p) {
     if (page == Page::Main && p != Page::Main) mainSel = sel;
+    else if (page == Page::Settings && p != Page::Main) settingsSel = sel;
     page = p;
-    if (p == Page::Main) sel = mainSel; else sel = 0;
+    sel = p == Page::Main ? mainSel : p == Page::Settings ? settingsSel : 0;
     message.clear();
 }
 
 std::vector<PauseMenu::Item> PauseMenu::items() const {
     switch (page) {
     case Page::Main: {
-        std::vector<Item> v = {kResume, kSound, kGraphics};
+        std::vector<Item> v = {kResume, kSettings};
         if (ctx.online) v.push_back(kOnline);
         v.push_back(kRecords);
         v.push_back(kControls);
@@ -66,8 +67,10 @@ std::vector<PauseMenu::Item> PauseMenu::items() const {
         v.push_back(kQuit);
         return v;
     }
-    case Page::Sound: return {kVolume, kFilter, kFullscreen, kTimer, kBack};
-    case Page::Graphics: return {kTextures, kPerspective, kNative, kWide, kSmooth, kVsync, kBack};
+    case Page::Settings: return {kGraphics, kSound, kExperimental, kBack};
+    case Page::Sound: return {kVolume, kTimer, kBack};
+    case Page::Graphics: return {kFullscreen, kWide, kFilter, kTextures, kPerspective, kSmooth, kVsync, kBack};
+    case Page::Experimental: return {kNative, kBack};
     case Page::Online: return {kTags, kOpacity, kRoster, kBack};
     default: return {};
     }
@@ -112,15 +115,17 @@ void PauseMenu::setSlider(Item item, float x) {
 void PauseMenu::activate(Item item) {
     switch (item) {
     case kResume: close(); break;
+    case kSettings: setPage(Page::Settings); break;
     case kSound: setPage(Page::Sound); break;
     case kGraphics: setPage(Page::Graphics); break;
+    case kExperimental: setPage(Page::Experimental); break;
     case kOnline: setPage(Page::Online); break;
     case kRecords: setPage(Page::Records); recordTop = 0; break;
     case kControls: setPage(Page::Controls); controlsSel = 0; column = 0; break;
     case kReport: result = Result::ReportBug; break;
     case kMainMenu: mainSel = sel; page = Page::ConfirmMenu; confirmSel = 1; break;
     case kQuit: mainSel = sel; page = Page::ConfirmQuit; confirmSel = 1; break;
-    case kBack: setPage(Page::Main); break;
+    case kBack: setPage(parentOf(page)); break;
     case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: case kTextures: case kPerspective: case kNative: case kWide: adjust(item, 1); break;
     default: break;
     }
@@ -186,7 +191,7 @@ void PauseMenu::key(int k, int action) {
     sel = std::min(sel, int(list.size()) - 1);
     if (up) move(sel, int(list.size()), up);
     else if (side) adjust(list[size_t(sel)], side);
-    else if (esc) { if (page == Page::Main) close(); else setPage(Page::Main); }
+    else if (esc) { if (page == Page::Main) close(); else setPage(parentOf(page)); }
     else if (enter) activate(list[size_t(sel)]);
 }
 
@@ -309,25 +314,39 @@ void PauseMenu::draw(double t) {
         hits.push_back({127, y - 3, 386, 42, index});
     };
 
+    // "UNSTABLE" marker for features that are not finished
+    auto badge = [&](float x, float y) {
+        const float w = canvas.width("UNSTABLE", 12) + 12;
+        canvas.rect(x - 1, y - 1, w + 2, 18, rgb(20, 10, 4));
+        canvas.rect(x, y, w, 16, rgb(236, 96, 30), rgb(150, 44, 14));
+        canvas.rect(x, y, w, 2, rgb(255, 200, 140), 0.45f);
+        canvas.text("UNSTABLE", x + 6, y + 2, 12, rgb(255, 250, 235), false);
+        return w;
+    };
+    const Rgb kWarn = rgb(255, 168, 70);
+
     std::string hint;
-    const bool listPage = page == Page::Main || page == Page::Sound || page == Page::Graphics || page == Page::Online;
+    const bool listPage = page == Page::Main || page == Page::Settings || page == Page::Sound || page == Page::Graphics || page == Page::Experimental || page == Page::Online;
     if (listPage) {
-        const char* heading = page == Page::Main ? "PAUSED" : page == Page::Sound ? "SOUND AND PICTURE" : page == Page::Graphics ? "GRAPHICS" : "ONLINE";
+        const char* heading = page == Page::Main ? "PAUSED" : page == Page::Settings ? "SETTINGS" : page == Page::Sound ? "SOUND AND TIMER" : page == Page::Graphics ? "DISPLAY" : page == Page::Experimental ? "EXPERIMENTAL" : "ONLINE";
         canvas.centred(heading, 38, page == Page::Main ? 54 : 44, kGold1, kGold2);
+        if (!ctx.release.empty()) canvas.text(ctx.release, 626 - canvas.width(ctx.release, 14), 34, 14, kDim);
         const auto list = items();
         sel = std::min(sel, int(list.size()) - 1);
         barX = 262; barW = 144;
-        const bool tight = list.size() > 7;   // eight rows must still clear the hint line at the bottom
-        const bool tighter = list.size() > 8;
-        const float step = tighter ? 37.0f : tight ? 41.0f : 44.0f;
-        float y = tighter ? 92.0f : tight ? 98.0f : 112.0f;
+        const size_t n = list.size();   // the rows must clear the description panel at the bottom
+        const float step = n >= 9 ? 37.0f : n == 8 ? 38.0f : n == 7 ? 41.0f : 44.0f;
+        float y = n >= 9 ? 92.0f : n == 8 ? 94.0f : n == 7 ? 98.0f : page == Page::Experimental ? 126.0f : 112.0f;
+        if (page == Page::Experimental) canvas.centred("NOT FINISHED YET - THESE OPTIONS CAN GLITCH", 88, 15, kWarn);
         for (size_t i = 0; i < list.size(); ++i, y += step) {
             const bool on = int(i) == sel;
             const int idx = int(i);
             switch (list[i]) {
             case kResume: centredRow(idx, y, on, "RESUME"); break;
-            case kSound: centredRow(idx, y, on, "SOUND AND PICTURE"); break;
-            case kGraphics: centredRow(idx, y, on, "GRAPHICS"); break;
+            case kSettings: centredRow(idx, y, on, "SETTINGS"); break;
+            case kSound: centredRow(idx, y, on, "SOUND AND TIMER"); break;
+            case kGraphics: centredRow(idx, y, on, "DISPLAY"); break;
+            case kExperimental: centredRow(idx, y, on, "EXPERIMENTAL"); badge(510 - canvas.width("UNSTABLE", 12) - 22, y + 10); break;
             case kOnline: centredRow(idx, y, on, "ONLINE"); break;
             case kRecords: centredRow(idx, y, on, "RECORDS"); break;
             case kControls: centredRow(idx, y, on, "CONTROLS"); break;
@@ -352,7 +371,10 @@ void PauseMenu::draw(double t) {
             case kTimer: valueRow(idx, y, on, "LEVEL TIMER", s->timer ? "ON" : "OFF", kTeal); break;
             case kWide: valueRow(idx, y, on, "WIDESCREEN", s->widescreen ? "ON" : "OFF", kTeal); break;
             case kPerspective: valueRow(idx, y, on, "PERSPECTIVE", s->perspective ? "ON" : "OFF", kTeal); break;
-            case kNative: valueRow(idx, y, on, "NATIVE WORLD", s->nativeWorld ? "ON" : "OFF", kTeal); break;
+            case kNative:
+                valueRow(idx, y, on, "NATIVE WORLD", s->nativeWorld ? "ON" : "OFF", kTeal);
+                badge(146 + canvas.width("NATIVE WORLD", 22) + 12, y + 10);
+                break;
             case kTextures: valueRow(idx, y, on, "TEXTURES", s->textures ? "SMOOTH" : "SHARP", kTeal); break;
             case kSmooth: valueRow(idx, y, on, "60 FPS SMOOTHING", s->smooth ? "ON" : "OFF", kTeal); break;
             case kVsync: valueRow(idx, y, on, "VSYNC", s->vsync ? "ON" : "OFF", kTeal); break;
@@ -360,10 +382,48 @@ void PauseMenu::draw(double t) {
             case kRoster: valueRow(idx, y, on, "PLAYER LIST", s->roster ? "ON" : "OFF", kTeal); break;
             }
         }
-        if (page == Page::Online) {
-            canvas.centred(sel == 1 ? "HOW SOLID THE OTHER PLAYERS' CRASHES ARE" : "F3 SHOWS OR HIDES THE PLAYER LIST IN THE GAME", 392, 15, kDim);
+        // What the selected row does (two short lines at most); unstable things are said so in orange.
+        struct Info { const char* a; const char* b; bool warn; };
+        auto describe = [&](Item item) -> Info {
+            switch (item) {
+            case kResume: return {"BACK TO THE GAME", "", false};
+            case kSettings: return {"DISPLAY, SOUND AND EXPERIMENTAL OPTIONS", "", false};
+            case kGraphics: return {"FULLSCREEN, WIDESCREEN, SHARPNESS, 60 FPS AND VSYNC", "", false};
+            case kSound: return {"THE VOLUME AND THE LEVEL TIMER", "", false};
+            case kExperimental: return {"UNSTABLE: FEATURES THAT ARE NOT FINISHED", "THEY CAN GLITCH. THE GAME WORKS WITHOUT THEM", true};
+            case kOnline: return {"NAME TAGS, THE PLAYER LIST AND HOW SOLID THE OTHERS ARE", "", false};
+            case kRecords: return {"YOUR BEST TIME IN EVERY LEVEL", "", false};
+            case kControls: return {"KEYBOARD AND GAME PAD BUTTONS", "", false};
+            case kReport: return {"TELL US WHAT WENT WRONG (OPENS GITHUB)", "", false};
+            case kMainMenu: return {"LEAVE THIS GAME FOR THE START MENU", "", false};
+            case kQuit: return {"CLOSE THE GAME", "", false};
+            case kVolume: return {"THE LOUDNESS OF MUSIC AND EFFECTS", "", false};
+            case kTimer: return {"SHOW THE TIME OF THE LEVEL IN THE CORNER", "", false};
+            case kFullscreen: return {"FILL THE WHOLE SCREEN WITH THE GAME", "", false};
+            case kWide: return {"FILL A WIDE WINDOW INSTEAD OF BLACK BARS AT THE SIDES", "", false};
+            case kFilter: return {"HOW THE PICTURE IS SCALED TO THE WINDOW", "NEAREST: PIXELS   SMOOTH: BLURRY   SHARP: CRISP", false};
+            case kTextures: return {"SHARP PIXELS LIKE THE CONSOLE, OR SMOOTHED TEXTURES", "", false};
+            case kPerspective: return {"STRAIGHT TEXTURES ON SLANTED SURFACES", "THE CONSOLE'S WOBBLE IS GONE", false};
+            case kSmooth: return {"IN-BETWEEN PICTURES FOR SMOOTHER MOTION", "BEST ON A MONITOR WITH A HIGH REFRESH RATE", false};
+            case kVsync: return {"WAIT FOR THE MONITOR: NO TEARING", "OFF: FASTER REPLIES, THE PICTURE MAY TEAR", false};
+            case kNative: return {"UNSTABLE: DRAWS THE LEVEL FROM ITS FILES", "IT CAN FLICKER OR MISS PARTS. OFF IS THE SAFE CHOICE", true};
+            case kTags: return {"THE NAMES OVER THE OTHER PLAYERS", "", false};
+            case kRoster: return {"THE PLAYER LIST AT THE RIGHT EDGE (F3)", "", false};
+            case kOpacity: return {"HOW SOLID THE OTHER PLAYERS' CRASHES ARE", "", false};
+            case kBack: return {"", "", false};
+            default: return {"", "", false};
+            }
+        };
+        const Info info = describe(list[size_t(sel)]);
+        const bool online = page == Page::Main && ctx.online;
+        if (info.a[0] || online) {
+            canvas.rect(56, 400, 528, 40, rgb(0, 6, 12), 0.55f);
+            canvas.rect(56, 400, 4, 40, info.warn ? rgb(236, 96, 30) : rgb(150, 92, 38));
+            const Rgb c = info.warn ? kWarn : kWhite1;
+            if (info.a[0]) canvas.centred(info.a, 404, 15, c);
+            if (info.b[0]) canvas.centred(info.b, 422, 14, info.warn ? kWarn : kDim);
+            else if (online) canvas.centred("ONLINE: THE OTHERS SEE YOU STAND STILL WHILE THIS IS OPEN", 422, 14, kDim);
         }
-        if (page == Page::Main && ctx.online) canvas.centred("ONLINE: THE OTHERS SEE YOU STAND STILL WHILE THIS IS OPEN", 432, 15, kDim);
         hint = "UP DOWN  SELECT      LEFT RIGHT  CHANGE      ENTER  CHOOSE      ESC  BACK";
     } else if (page == Page::Records) {
         canvas.centred("RECORDS", 22, 46, kGold1, kGold2);

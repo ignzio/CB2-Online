@@ -42,7 +42,7 @@ bool Multiplayer::start(const Options& options, std::string& error) {
     playerName = playerName.substr(0, cb2net::kNameLength - 1);
     if (opt.fake) return true;
     bool ok = false;
-    if (opt.online) ok = net.start({opt.room, playerName, opt.rendezvous, opt.directory, opt.seeds, opt.joinViaDirectory}, error);
+    if (opt.online) ok = net.start({opt.room, playerName, opt.rendezvous, opt.directory, opt.seeds, opt.joinViaDirectory, opt.password}, error);
     else error = "online play is not switched on";
     if (ok) announce(0xFF);
     return ok;
@@ -68,11 +68,11 @@ void Multiplayer::announce(uint32_t lvl) {
 }
 
 void Multiplayer::install() {
-    p.addHook(kObjectStep, [this](psx::Platform& pl) { onStepEnter(pl.cpu.r[4]); });
-    p.addHook(kObjectStepReturn, [this](psx::Platform&) { onStepReturn(); });
+    p.addHook(cb2game::current().objectStep, [this](psx::Platform& pl) { onStepEnter(pl.cpu.r[4]); });
+    p.addHook(cb2game::current().objectStepReturn, [this](psx::Platform&) { onStepReturn(); });
     // Right after the object update has worked out which model the current frame uses and before it draws it: if the lookup failed for one
     // of our objects (a pose whose model is not loaded) the object is left undrawn instead of crashing the draw code.
-    p.addHook(kAfterAnimate, [this](psx::Platform& pl) {
+    p.addHook(cb2game::current().afterAnimate, [this](psx::Platform& pl) {
         const uint32_t obj = pl.cpu.r[17];
         if (!steppingPuppet || obj != steppingPuppet->obj) return;
         Puppet& pu = *steppingPuppet;
@@ -88,14 +88,14 @@ void Multiplayer::install() {
     p.onDisplayList = [this] { buildTags(); };
     // The extra Crash's own script must not run: left alone it eventually executes a "return" and the engine deletes the object. Every
     // entry into the script interpreter for one of our objects is answered here with the usual "carry on" result.
-    p.addHook(kRunScript, [this](psx::Platform& pl) {
+    p.addHook(cb2game::current().runScript, [this](psx::Platform& pl) {
         const uint32_t o = pl.cpu.r[4];
         if (puppets.empty() || !isOurs(o)) return;
         pl.cpu.r[2] = 0xFFFFFF01u;
         pl.cpu.pc = pl.cpu.r[31];
         pl.cpu.nextPc = pl.cpu.pc + 4;
     });
-    p.addHook(kOpenLevel, [this](psx::Platform& pl) {
+    p.addHook(cb2game::current().openLevel, [this](psx::Platform& pl) {
         if (debug()) std::printf("[mp] frame %llu: open-level call a0=%08x a1=%08x a2=%08x a3=%08x ra=%08x\n", (unsigned long long)pl.frames, pl.cpu.r[4], pl.cpu.r[5], pl.cpu.r[6], pl.cpu.r[7], pl.cpu.r[31]);
         if (pl.cpu.r[4] == 0) onLevel(pl.cpu.r[5]);
     });
@@ -154,24 +154,24 @@ bool Multiplayer::recordSound(uint32_t obj) {
 }
 
 bool Multiplayer::isOurs(uint32_t a) {
-    return isObject(a) && p.peek32(a + F(kMarkerField)) == kMarker && p.peek32(a + 0x44) == kPuppetParent;
+    return isObject(a) && p.peek32(a + F(kMarkerField)) == kMarker && p.peek32(a + 0x44) == cb2game::current().puppetParent;
 }
 
 // The game's current player object. Normally its "player" field points at itself, but after a death / respawn or a teleport the engine can
 // leave that field pointing at another object while the object is still the live Crash, so the global that names the current player counts too.
 bool Multiplayer::isPlayer(uint32_t a) {
-    return a && isObject(a) && (p.peek32(a + F(kPlayer)) == a || a == p.peek32(kPlayerGlobal));
+    return a && isObject(a) && (p.peek32(a + F(kPlayer)) == a || a == p.peek32(cb2game::current().playerGlobal));
 }
 
 bool Multiplayer::isPuppet(uint32_t a) {
     return a && player && a != player && isObject(a) && p.peek32(a + F(kMarkerField)) == kMarker && p.peek32(a + F(29)) == kPuppetSubtype &&
-           p.peek32(a + kEntryPtr) == p.peek32(player + kEntryPtr) && p.peek32(a + 0x44) == kPuppetParent;
+           p.peek32(a + kEntryPtr) == p.peek32(player + kEntryPtr) && p.peek32(a + 0x44) == cb2game::current().puppetParent;
 }
 
 uint32_t Multiplayer::findPlayer() {
     // The game keeps its current player object in a global. The memory of an earlier Crash (a cutscene's) stays intact after the engine drops
     // it, so a scan alone would keep finding that stale copy.
-    const uint32_t current = p.peek32(kPlayerGlobal);
+    const uint32_t current = p.peek32(cb2game::current().playerGlobal);
     if (isPlayer(current)) { player = current; return player; }
     player = 0;
     return 0;
@@ -228,7 +228,7 @@ void Multiplayer::onStepEnter(uint32_t obj) {
         break;
     }
     // One of our objects that we have removed (or could not remove yet) but the engine's loop still reaches: leave it alone.
-    if (!ours && p.peek32(obj + F(kMarkerField)) == kMarker && p.peek32(obj + 0x44) == kPuppetParent && p.peek32(obj + 4) == kObjectType) {
+    if (!ours && p.peek32(obj + F(kMarkerField)) == kMarker && p.peek32(obj + 0x44) == cb2game::current().puppetParent && p.peek32(obj + 4) == kObjectType) {
         stepping = 0;
         p.cpu.r[2] = 0;
         p.cpu.pc = p.cpu.r[31];
@@ -428,8 +428,8 @@ uint32_t Multiplayer::spawnPuppet() {
     ++prof.spawns;
     uint32_t obj = 0;
     static const bool forceFault = std::getenv("CB2_MPFAULT") != nullptr;   // tests: the first spawns call the engine with a bad parent
-    const uint32_t parent = (forceFault && prof.spawns <= 2) ? 0xFFFFFFF0u : kPuppetParent;
-    const bool ok = guarded("creating a player's Crash", [&] { obj = p.callFunction(kCreateObject, {parent, 0, kPuppetSubtype, 0}, {0, 0}); });
+    const uint32_t parent = (forceFault && prof.spawns <= 2) ? 0xFFFFFFF0u : cb2game::current().puppetParent;
+    const bool ok = guarded("creating a player's Crash", [&] { obj = p.callFunction(cb2game::current().createObject, {parent, 0, kPuppetSubtype, 0}, {0, 0}); });
     if (!ok) {
         // do not hammer the engine: wait, and give up on this level after a few failures in a row
         retryAt = p.frames + 120 * uint64_t(1 + spawnFailures);
@@ -443,7 +443,7 @@ uint32_t Multiplayer::spawnPuppet() {
 
 void Multiplayer::killObject(uint32_t obj) {
     ++prof.kills;
-    guarded("removing a player's Crash", [&] { p.callFunction(kDestroyObject, {obj, 0}); });
+    guarded("removing a player's Crash", [&] { p.callFunction(cb2game::current().destroyObject, {obj, 0}); });
     if (isObject(obj) && std::find(zombies.begin(), zombies.end(), obj) == zombies.end()) zombies.push_back(obj);
 }
 
@@ -462,7 +462,7 @@ void Multiplayer::manage() {
             if (!isOurs(it->second.obj)) it = puppets.erase(it); else ++it;
         }
         if (debug() && p.frames % 60 == 0) {
-            const uint32_t g = p.peek32(kPlayerGlobal);
+            const uint32_t g = p.peek32(cb2game::current().playerGlobal);
             auto dump = [&](const char* tag, uint32_t a) {
                 std::printf("[mp]   %s %08x: first %08x type %08x record %08x entry %08x parent %08x pos %d,%d,%d fgrp %08x(type %u) f5 %08x f29 %08x f63 %08x\n", tag, a, p.peek32(a), p.peek32(a + 4), p.peek32(a + 8), p.peek32(a + 0xC),
                             p.peek32(a + 0x44), int(p.peek32(a + F(kX))), int(p.peek32(a + F(kY))), int(p.peek32(a + F(kZ))), p.peek32(a + F(kFrameGroup)), poseType(a), p.peek32(a + F(5)), p.peek32(a + F(29)), p.peek32(a + F(63)));
@@ -487,7 +487,7 @@ void Multiplayer::manage() {
     const bool settled = running && playerSteps >= settleSteps;
     if (debug() && p.frames % 30 == 0) {
         std::printf("[mp] frame %llu: global %08x player %08x (isPlayer %d, pose type %u, record ok %d, field5 %08x) level %02X steps %llu running %d | puppets:", (unsigned long long)p.frames,
-                    p.peek32(kPlayerGlobal), player, int(isPlayer(player)), poseType(player), int(recordValid(player)), player ? p.peek32(player + F(kPlayer)) : 0, level,
+                    p.peek32(cb2game::current().playerGlobal), player, int(isPlayer(player)), poseType(player), int(recordValid(player)), player ? p.peek32(player + F(kPlayer)) : 0, level,
                     (unsigned long long)playerSteps, int(running));
         for (const auto& [pid, pu] : puppets)
             std::printf(" [%u obj %08x isPuppet %d lastStep %llu pos %d,%d,%d]", pid, pu.obj, int(isPuppet(pu.obj)), (unsigned long long)pu.lastStep,

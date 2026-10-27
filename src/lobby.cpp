@@ -63,6 +63,9 @@ std::string upper(std::string s) {
 bool nameChar(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '-' || c == '_' || c == '.'; }
 
 enum class Screen { Main, Rooms, Waiting };
+
+const char* releaseLabel() { return cb2net::localRegion() == 1 ? "EUROPEAN (PAL)" : "AMERICAN (NTSC-U)"; }
+bool passwordChar(char c) { return c >= 33 && c < 127; }
 enum Item { kOffline, kLocal, kOnline, kName, kQuit, kUpdate, kItems };
 
 // One line of the room list: the "create" row, a room, or a dedicated server from the lobby directory.
@@ -74,6 +77,7 @@ struct Row {
     std::vector<cb2net::Endpoint> endpoints; // room: players to contact (from the directory, for rooms without a server)
     bool listed = false;                     // the directory knows this room
     std::string serverText;                  // server: "ip:port"
+    bool locked = false;                     // the room asks for a password
 };
 
 std::string upperKey(std::string s) {
@@ -104,6 +108,9 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
     Screen screen = Screen::Main;
     int selected = kOnline, editing = -1, roomSel = 0, roomTop = 0;
     bool creating = false, localMode = false;   // localMode: only this PC and the local network (no lobby service)
+    bool askingPassword = false, passwordForNew = false, justCreated = false;   // the password prompt: for a room we are making, or a locked room we are joining
+    std::string passwordText;
+    Row pendingRow;
     std::string message;
     double stagingSince = 0;
     size_t scriptPos = 0;
@@ -141,9 +148,10 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
         roomSel = 0;
         roomTop = 0;
         creating = false;
+        askingPassword = false;
         message.clear();
     };
-    auto enterRoom = [&](const std::string& which, const Row* row) {
+    auto enterRoom = [&](const std::string& which, const Row* row, const std::string& password) {
         options.name = name;
         options.online = true;
         options.room = which.empty() ? "PUBLIC" : which;
@@ -151,6 +159,8 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
         options.directory = localMode ? std::string() : directoryUrl;
         options.seeds.clear();
         options.joinViaDirectory = false;
+        options.password = password;
+        justCreated = row == nullptr;
         if (localMode) {}
         else if (row && !row->rendezvous.empty()) options.rendezvous = row->rendezvous;      // the room lives on a server: go through it
         else if (row && row->listed && !row->endpoints.empty() && !directoryUrl.empty()) {   // a player's room: contact the members, hand-shake through the directory
@@ -170,7 +180,7 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
         rows.push_back(create);
         std::vector<Row> rooms;
         auto find = [&](const std::string& n) -> Row* { for (Row& r : rooms) if (upperKey(r.name) == upperKey(n)) return &r; return nullptr; };
-        for (const auto& r : browser.rooms()) { Row row; row.name = r.name; row.players = r.players; rooms.push_back(row); }
+        for (const auto& r : browser.rooms()) { Row row; row.name = r.name; row.players = r.players; row.locked = r.locked; rooms.push_back(row); }
         for (const auto& r : dirBrowse.rooms()) {
             Row* row = find(r.name);
             if (!row) { rooms.emplace_back(); row = &rooms.back(); row->name = r.name; }
@@ -178,6 +188,7 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
             row->rendezvous = r.rendezvous;
             row->endpoints = r.endpoints;
             row->listed = true;
+            row->locked = row->locked || r.locked;
         }
         std::stable_sort(rooms.begin(), rooms.end(), [](const Row& a, const Row& b) { return a.players > b.players; });
         rows.insert(rows.end(), rooms.begin(), rooms.end());
@@ -224,6 +235,17 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                 if (ev.type == Event::Esc) { mp.stop(); openRooms(localMode); }
                 continue;
             }
+            if (screen == Screen::Rooms && askingPassword) {   // typing a password (shown as stars)
+                if (ev.type == Event::Char) { if (passwordChar(ev.c) && passwordText.size() < size_t(cb2net::kNameLength - 1)) passwordText += ev.c; }
+                else if (ev.type == Event::Back) { if (!passwordText.empty()) passwordText.pop_back(); }
+                else if (ev.type == Event::Esc) askingPassword = false;
+                else if (ev.type == Event::Enter) {
+                    if (passwordForNew) { askingPassword = false; enterRoom(newRoom, nullptr, passwordText); }
+                    else if (passwordText.empty()) message = "TYPE THE PASSWORD";
+                    else { askingPassword = false; enterRoom(pendingRow.name, &pendingRow, passwordText); }
+                }
+                continue;
+            }
             if (screen == Screen::Rooms && creating) {   // typing the name of a new room
                 if (ev.type == Event::Char) { if (nameChar(ev.c) && newRoom.size() < size_t(cb2net::kNameLength - 1)) newRoom += ev.c; }
                 else if (ev.type == Event::Back) { if (!newRoom.empty()) newRoom.pop_back(); }
@@ -231,7 +253,7 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                 else if (ev.type == Event::Enter) {
                     while (!newRoom.empty() && newRoom.back() == ' ') newRoom.pop_back();
                     if (newRoom.empty()) message = "GIVE THE ROOM A NAME";
-                    else { creating = false; enterRoom(newRoom, nullptr); }
+                    else { creating = false; askingPassword = passwordForNew = true; passwordText.clear(); message.clear(); }
                 }
                 continue;
             }
@@ -249,10 +271,11 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                         // a dedicated server: join its room (everybody who picks the server meets there); it also relays for strict routers
                         Row row = rows[size_t(roomSel)];
                         row.rendezvous = row.serverText;
-                        enterRoom(row.name, &row);
+                        enterRoom(row.name, &row, "");
                     } else if (roomSel < int(rows.size())) {
                         const Row row = rows[size_t(roomSel)];
-                        enterRoom(row.name, &row);
+                        if (row.locked) { pendingRow = row; askingPassword = true; passwordForNew = false; passwordText.clear(); message.clear(); }
+                        else enterRoom(row.name, &row, "");
                     }
                 }
                 continue;
@@ -293,7 +316,14 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
             }
         }
         if (!updateShown() && selected == kUpdate) selected = kOnline;
-        if (screen == Screen::Waiting) mp.tick();
+        if (screen == Screen::Waiting) {
+            mp.tick();
+            if (mp.session().denied()) {   // somebody in the room (or the server) refused our password
+                mp.stop();
+                openRooms(localMode);
+                message = justCreated ? "THAT ROOM EXISTS - ANOTHER PASSWORD" : "WRONG PASSWORD";
+            }
+        }
         if (screen == Screen::Rooms) {
             roomSel = std::min(roomSel, std::max(0, rowCount - 1));
             if (roomSel < roomTop) roomTop = roomSel;
@@ -343,7 +373,7 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                 }
                 y += step;
             }
-            if (!version.empty()) canvas.text("V" + version, 626 - canvas.width("V" + version, 14), 34, 14, kDim);
+            if (!version.empty()) { const std::string v = "V" + version + (cb2net::localRegion() == 1 ? "  PAL" : "  NTSC-U"); canvas.text(v, 626 - canvas.width(v, 14), 34, 14, kDim); }
             if (editing < 0 && hints[selected][0]) canvas.centred(hints[selected], 418, 16, kDim);
             if (!message.empty()) canvas.centred(message, 394, 22, kRed);
             canvas.centred(editing >= 0 ? "TYPE.  BACKSPACE DELETES.  ENTER WHEN DONE" : "UP DOWN  SELECT      ENTER  CHOOSE      ESC  QUIT", 446, 18, kDim);
@@ -357,8 +387,17 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                 const bool dirOk = dirBrowse.reachable();
                 canvas.centred(dirOk ? "CONNECTED" : "CONNECTING...", 134, 16, dirOk ? kGreen : kRed);
             }
+            canvas.centred(std::string("ROOMS OF THE ") + releaseLabel() + " RELEASE", 152, 14, kDim);
             float y = 172;
-            if (creating) {
+            if (askingPassword) {
+                plank(canvas, 120, 200, 400, 56, true);
+                canvas.centred(passwordForNew ? "PASSWORD  (LEAVE EMPTY FOR AN OPEN ROOM)" : "THIS ROOM NEEDS A PASSWORD", 166, 20, kTeal);
+                const std::string stars(passwordText.size(), '*');
+                canvas.centred(stars + (blink ? "_" : ""), 208, 34, kGold1, kGold2);
+                canvas.centred(passwordForNew ? "ENTER  CREATE      ESC  CANCEL" : "ENTER  JOIN      ESC  CANCEL", 300, 20, kDim);
+                if (passwordForNew) canvas.centred("ONLY PLAYERS WHO KNOW IT CAN JOIN", 326, 15, kDim);
+                if (!message.empty()) canvas.centred(message, 350, 22, kRed);
+            } else if (creating) {
                 plank(canvas, 120, 200, 400, 56, true);
                 canvas.centred("NAME OF THE NEW ROOM", 166, 22, kTeal);
                 const std::string shown = newRoom + (blink ? "_" : "");
@@ -380,6 +419,7 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
                         canvas.text(upper(r.name), 146, y + 5, 26, sel ? kGold1 : kWhite1, sel ? kGold2 : kWhite2);
                         const std::string count = std::to_string(r.players) + (r.players == 1 ? " PLAYER" : " PLAYERS");
                         canvas.text(count, 494 - canvas.width(count, 22), y + 8, 22, sel ? rgb(255, 244, 200) : kTeal);
+                        if (r.locked) lockIcon(canvas, 494 - canvas.width(count, 22) - 30, y + 9, sel ? kGold1 : kWhite2);
                     }
                 }
                 if (rowCount <= 1) canvas.centred(localMode ? "NO LOCAL ROOMS YET - CREATE ONE" : "NO ROOMS YET - BE THE FIRST, CREATE ONE", y + 4, 17, kDim);
@@ -392,6 +432,7 @@ Outcome run(GLFWwindow* win, cb2mp::Multiplayer& mp, cb2mp::Options& options, co
             title(canvas, "WAITING ROOM");
             const cb2net::Session& net = mp.session();
             canvas.centred(upper(room), 134, 34, kGold1, kGold2);
+            if (net.locked()) lockIcon(canvas, 320 + canvas.width(upper(room), 34) * 0.5f + 14, 140, kGold1);
             if (!net.directoryEnabled() && net.serverState() == 0) {
                 canvas.centred("THIS PC AND LOCAL NETWORK", 176, 16, kDim);
             } else if (net.serverState() == 0) {

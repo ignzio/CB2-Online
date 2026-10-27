@@ -145,7 +145,7 @@ bool looksLikeImage(const std::string& path) {
     return e == ".CUE" || e == ".BIN" || e == ".ISO" || e == ".IMG";
 }
 
-Result importDisc(const std::string& imagePath, const std::string& outDir, const Progress& progress) {
+Result importDisc(const std::string& imagePath, const std::string& outDirNtsc, const Progress& progress, const std::string& outDirPal) {
     Result r;
     std::string path = imagePath;
     if (extensionOf(path) == ".CUE") {
@@ -166,12 +166,13 @@ Result importDisc(const std::string& imagePath, const std::string& outDir, const
 
     // what the game needs: the executable, its config and the level files in S0..S3
     std::vector<Item> items;
-    bool haveExe = false;
+    bool haveNtscExe = false, havePalExe = false;
     for (const Entry& e : root) {
         const std::string n = upper(e.name);
-        if (!e.dir && (n == "SCUS_941.54" || n == "SYSTEM.CNF") && safeName(n)) {
+        if (!e.dir && (n == "SCUS_941.54" || n == "SCES_009.67" || n == "SYSTEM.CNF") && safeName(n)) {
             items.push_back({n, e.lba, e.size});
-            if (n == "SCUS_941.54") haveExe = true;
+            if (n == "SCUS_941.54") haveNtscExe = true;
+            if (n == "SCES_009.67") havePalExe = true;
         } else if (e.dir && (n == "S0" || n == "S1" || n == "S2" || n == "S3")) {
             std::vector<Entry> kids;
             if (!readDirectory(img, e.lba, e.size, kids)) { r.error = "the disc image is damaged (folder " + n + ")"; return r; }
@@ -179,7 +180,10 @@ Result importDisc(const std::string& imagePath, const std::string& outDir, const
                 if (!k.dir && safeName(k.name)) items.push_back({n + "\\" + upper(k.name), k.lba, k.size});
         }
     }
-    if (!haveExe) { r.error = "this is not Crash Bandicoot 2 (NTSC-U, SCUS-94154): SCUS_941.54 is not on the disc"; return r; }
+    if (!haveNtscExe && !havePalExe) { r.error = "this is not Crash Bandicoot 2 (NTSC-U SCUS-94154 or PAL SCES-00967): neither SCUS_941.54 nor SCES_009.67 is on the disc"; return r; }
+    r.profile = havePalExe ? &cb2game::pal() : &cb2game::ntsc();
+    const std::string outDir = (havePalExe && !outDirPal.empty()) ? outDirPal : outDirNtsc;
+    r.folder = outDir;
     int levelFiles = 0;
     uint64_t total = 0;
     for (const Item& it : items) { total += it.size; if (it.rel.size() > 3 && it.rel[2] == '\\') ++levelFiles; }

@@ -167,11 +167,12 @@ void DirectoryClient::stop() {
     memberSet = joinPending = false;
 }
 
-void DirectoryClient::setMember(const std::string& room, uint32_t uid, const std::string& name, const std::string& ip, uint16_t port, const std::string& rendezvous) {
+void DirectoryClient::setMember(const std::string& room, uint32_t uid, const std::string& name, const std::string& ip, uint16_t port, const std::string& rendezvous, bool locked) {
     std::lock_guard<std::mutex> l(mu);
     const std::string r = only(room, kNameChars, 15), n = only(name, kNameChars, 15), i = only(ip, kIpChars, 15), rv = only(rendezvous, kHostChars, 64);
-    if (memberSet && r == mRoom && n == mName && i == mIp && rv == mRendezvous && uid == mUid && port == mPort) return;
+    if (memberSet && r == mRoom && n == mName && i == mIp && rv == mRendezvous && uid == mUid && port == mPort && locked == mLocked) return;
     memberSet = true;
+    mLocked = locked;
     mRoom = r; mName = n; mIp = i; mRendezvous = rv; mUid = uid; mPort = port;
     lastAnnounce = -1e9;   // announce at once
     cv.notify_all();
@@ -202,12 +203,12 @@ void DirectoryClient::loop() {
                 announce = true;
                 lastAnnounce = now;
                 body = "{\"kind\":\"member\",\"room\":\"" + mRoom + "\",\"uid\":" + std::to_string(mUid) + ",\"name\":\"" + mName + "\",\"port\":" + std::to_string(mPort) +
-                       ",\"ip\":\"" + mIp + "\",\"version\":\"" + kVersion + "\",\"rendezvous\":\"" + mRendezvous + "\"}";
+                       ",\"ip\":\"" + mIp + "\",\"version\":\"" + kVersion + "\",\"region\":\"" + regionText(localRegion()) + "\",\"locked\":" + (mLocked ? "true" : "false") + ",\"rendezvous\":\"" + mRendezvous + "\"}";
             }
             if (joinPending) {
                 join = true;
                 joinPending = false;
-                jbody = "{\"room\":\"" + jRoom + "\",\"port\":" + std::to_string(jPort) + ",\"ip\":\"" + jIp + "\",\"version\":\"" + kVersion + "\"}";
+                jbody = "{\"room\":\"" + jRoom + "\",\"port\":" + std::to_string(jPort) + ",\"ip\":\"" + jIp + "\",\"version\":\"" + kVersion + "\",\"region\":\"" + regionText(localRegion()) + "\"}";
             }
             if (listWanted && now - lastList >= 3.0) { list = true; lastList = now; }
         }
@@ -230,14 +231,14 @@ void DirectoryClient::loop() {
                 if (f.size() >= 2 && f[0] == "J" && parseEndpoint(f[1], e) && std::find(joiners.begin(), joiners.end(), e) == joiners.end()) joiners.push_back(e);
             }
         }
-        if (list && http("GET", std::string("/rooms?version=") + kVersion, "", r) && r.status == 200) {
+        if (list && http("GET", std::string("/rooms?version=") + kVersion + "&region=" + regionText(localRegion()), "", r) && r.status == 200) {
             std::vector<DirRoom> rl;
             std::vector<DirServer> sl;
             for (const std::string& line : split(r.body, '\n')) {
                 const auto f = split(line, '\t');
                 if (f.size() >= 6 && f[0] == "R") {
                     DirRoom d;
-                    d.name = f[1]; d.players = std::atoi(f[2].c_str()); d.version = f[4]; d.rendezvous = f[5];
+                    d.name = f[1]; d.players = std::atoi(f[2].c_str()); d.version = f[4]; d.rendezvous = f[5]; d.locked = f.size() >= 7 && f[6] == "1";
                     for (const std::string& ep : split(f[3], ',')) { Endpoint e; if (parseEndpoint(ep, e)) d.endpoints.push_back(e); }
                     rl.push_back(d);
                 } else if (f.size() >= 5 && f[0] == "S") {

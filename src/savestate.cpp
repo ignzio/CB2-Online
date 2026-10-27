@@ -179,7 +179,7 @@ bool saveState(Platform& p, const std::string& path, const std::vector<uint8_t>&
     StateAccess::platform(payload, p);
     Writer file;
     file.bytes(const_cast<char*>(kMagic), sizeof kMagic);
-    uint32_t version = kVersion, ramSize = uint32_t(p.ram.size()), extraSize = uint32_t(extra.size());
+    uint32_t version = kVersion | (uint32_t(p.profile->region) << 8), ramSize = uint32_t(p.ram.size()), extraSize = uint32_t(extra.size());   // the release is part of the version: a PAL state is not an NTSC-U one
     uint64_t payloadSize = payload.out.size();
     pod(file, version); pod(file, ramSize); pod(file, extraSize);
     if (extraSize) file.bytes(const_cast<uint8_t*>(extra.data()), extra.size());
@@ -219,7 +219,8 @@ bool loadState(Platform& p, const std::string& path, std::vector<uint8_t>& extra
     uint32_t version = 0, ramSize = 0, extraSize = 0;
     pod(r, version); pod(r, ramSize); pod(r, extraSize);
     if (!r.ok || std::memcmp(magic, kMagic, sizeof magic) != 0) { error = "this is not a save state file"; return false; }
-    if (version != kVersion) { error = "this save state was made by another version of the game"; return false; }
+    if ((version & 0xFF) != kVersion) { error = "this save state was made by another version of the game"; return false; }
+    if (((version >> 8) & 0xFF) != uint32_t(p.profile->region)) { error = std::string("this save state belongs to the other release of the game (") + (p.profile->region == cb2game::Region::Pal ? "NTSC-U" : "PAL") + ")"; return false; }
     if (ramSize != p.ram.size()) { error = "this save state was made with a different amount of memory (ram_mb)"; return false; }
     if (extraSize > kMaxBlob) { error = "damaged save state"; return false; }
     std::vector<uint8_t> loadedExtra(extraSize);

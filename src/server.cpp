@@ -1,7 +1,10 @@
 // Rendezvous server for online play: the matchmaker. Runs no game. Builds on Windows and Linux (g++ -O2 -std=c++17 server.cpp -o cb2_server).
-//   cb2_server [port] [--quiet]        (default UDP port 7777)
+//   cb2_server [port] [--quiet] [--name "My server"] [--announce <lobby service URL>] [--no-announce] [--public-port N]        (default UDP port 7777)
+// A build made by CMake lists itself in the game's built-in lobby service (local/directory.txt) unless told not to, so players find it in the game's server list.
 //
 // What it does (the players do the rest, see netproto.hpp):
+//   0. A room can have a password. The players never send it: the one who opens the room gives the server a one-way image of it (a verifier) and the server only lets
+//      players in whose image is the same; the players themselves check a tag on every packet (netproto.hpp), so a relayed packet cannot be forged by a stranger either.
 //   1. A player registers in a room (a name they type) about once a second. The server notes the public address and port its packets come
 //      from, and the private address the player reports.
 //   2. It answers with the other members of the room and both of their addresses, so the players can send packets to each other and
@@ -58,8 +61,12 @@ struct Member {
 };
 struct Room {
     char name[kNameLength] = {};
+    uint8_t region = 0;
+    uint64_t verifier = 0;   // one-way image of the room's password key, from whoever opened it; 0 = open room
     std::map<uint32_t, Member> members;
 };
+// A room is identified by the release of the game as well as its name: the two releases never meet.
+uint64_t roomKeyOf(uint8_t region, uint32_t room) { return uint64_t(region) << 32 | room; }
 
 std::string ipText(uint32_t ip) {
     char b[32];
@@ -129,10 +136,14 @@ int main(int argc, char** argv) {
     uint16_t port = kDefaultPort;
     bool quiet = false;
     Announcer announcer;
+#ifdef CB2_DEFAULT_DIRECTORY
+    announcer.url = CB2_DEFAULT_DIRECTORY;
+#endif
     announcer.name = "Crash 2 server";
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--quiet")) quiet = true;
         else if (!std::strcmp(argv[i], "--announce") && i + 1 < argc) announcer.url = argv[++i];
+        else if (!std::strcmp(argv[i], "--no-announce")) announcer.url.clear();   // private server: only people who know its address can use it
         else if (!std::strcmp(argv[i], "--name") && i + 1 < argc) {
             announcer.name.clear();
             for (const char* c = argv[++i]; *c && announcer.name.size() < 15; ++c) if (std::isalnum(static_cast<unsigned char>(*c)) || *c == ' ' || *c == '-' || *c == '_' || *c == '.') announcer.name += *c;
@@ -140,7 +151,7 @@ int main(int argc, char** argv) {
         }
         else if (!std::strcmp(argv[i], "--public-port") && i + 1 < argc) announcer.publicPort = unsigned(std::atoi(argv[++i]));
         else if (std::atoi(argv[i]) > 0) port = uint16_t(std::atoi(argv[i]));
-        else { std::fprintf(stderr, "usage: cb2_server [port] [--quiet] [--announce https://directory.example.workers.dev] [--name \"My server\"] [--public-port N]\n"); return 2; }
+        else { std::fprintf(stderr, "usage: cb2_server [port] [--quiet] [--announce https://directory.example.workers.dev | --no-announce] [--name \"My server\"] [--public-port N]\n"); return 2; }
     }
     if (!announcer.url.empty() && !Announcer::safeUrl(announcer.url)) { std::fprintf(stderr, "--announce needs an http(s) address with only letters, digits and . : / - _\n"); return 2; }
     if (!announcer.publicPort) announcer.publicPort = port;
@@ -165,16 +176,19 @@ int main(int argc, char** argv) {
     }
     std::printf("Crash 2 rendezvous server listening on UDP port %u. Players set  rendezvous = <this machine's address>%s  in cb2.cfg. Ctrl+C stops it.\n",
                 unsigned(port), port == kDefaultPort ? "" : (":" + std::to_string(port)).c_str());
-    if (!announcer.url.empty()) std::printf("Listing this server in the lobby directory %s as \"%s\" (public UDP port %u). Forward that port if the machine is behind a router.\n", announcer.url.c_str(), announcer.name.c_str(), announcer.publicPort);
+    if (!announcer.url.empty()) std::printf("Listing this server in the lobby directory %s as \"%s\" (public UDP port %u). Players only reach it if that port is open to the internet (forward UDP %u on your router, or open it in the cloud firewall); --no-announce keeps the server private.\n", announcer.url.c_str(), announcer.name.c_str(), announcer.publicPort, announcer.publicPort);
+    else std::printf("Not listed in any lobby directory: players have to type this server's address (--announce <url> lists it).\n");
     std::fflush(stdout);
 
     const auto start = std::chrono::steady_clock::now();
     auto clock = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); };
-    std::unordered_map<uint32_t, Room> rooms;
+    std::unordered_map<uint64_t, Room> rooms;
     double lastSweep = 0, lastStats = 0, lastAnnounce = -1e9;
+    std::unordered_map<uint64_t, double> deniedAt;
     unsigned long long relayed = 0, registered = 0;
 
-    auto sendTo = [&](const Endpoint& to, const std::vector<uint8_t>& data) {
+    auto sendTo = [&](const Endpoint& to, std::vector<uint8_t> data, uint8_t region = 0, uint32_t auth = 0) {
+        stampPacket(data, region, auth);
         sockaddr_in a{};
         a.sin_family = AF_INET;
         a.sin_addr.s_addr = to.ip;
@@ -215,27 +229,37 @@ int main(int argc, char** argv) {
                     if (!isListRequest(size_t(n))) continue;   // unpadded requests could be used to flood somebody else
                     std::vector<RoomEntry> list;
                     for (const auto& [rid, rm] : rooms) {
+                        if (rm.region != h.region) continue;
                         RoomEntry e;
+                        e.locked = rm.verifier != 0;
                         std::memcpy(e.name, rm.name, kNameLength);
                         for (const auto& [uid, m] : rm.members) e.players += now - m.lastSeen <= kMemberTimeout ? 1 : 0;
                         if (e.players) list.push_back(e);
                     }
                     std::sort(list.begin(), list.end(), [](const RoomEntry& a, const RoomEntry& b) { return a.players > b.players; });
-                    sendTo(src, encodeRooms(list));
+                    sendTo(src, encodeRooms(list), h.region);
                     continue;
                 }
-                auto roomIt = rooms.find(h.room);
+                auto roomIt = rooms.find(roomKeyOf(h.region, h.room));
 
                 if (h.type == kRegister) {
                     Register r;
                     if (!decodeRegister(buf, size_t(n), r) || h.room != roomHash(r.roomName)) continue;
                     if (roomIt == rooms.end()) {
                         if (rooms.size() >= kMaxRooms) continue;
-                        roomIt = rooms.emplace(h.room, Room{}).first;
+                        roomIt = rooms.emplace(roomKeyOf(h.region, h.room), Room{}).first;
                         std::memcpy(roomIt->second.name, r.roomName, kNameLength);
-                        log("room \"%s\" opened%s%s", r.roomName, "", "");
+                        roomIt->second.region = h.region;
+                        roomIt->second.verifier = r.verifier;
+                        log("room \"%s\" opened%s%s", r.roomName, r.verifier ? " (password)" : "", "");
                     }
                     Room& room = roomIt->second;
+                    if (room.verifier != r.verifier) {   // wrong or missing password: not a member, and told so
+                        double& last = deniedAt[src.key()];   // at most one refusal per address and half a second
+                        if (now - last >= 0.5) { last = now; sendTo(src, encodeDenied(h.room, h.uid), h.region); }
+                        if (deniedAt.size() > 4096) deniedAt.clear();
+                        continue;
+                    }
                     auto mit = room.members.find(h.uid);
                     if (mit == room.members.end()) {
                         size_t fromSameAddress = 0;
@@ -263,7 +287,7 @@ int main(int argc, char** argv) {
                         p.priv = o.priv;
                         others.push_back(p);
                     }
-                    sendTo(src, encodePeers(h.room, others));
+                    sendTo(src, encodePeers(h.room, others), h.region);
                 } else if (roomIt != rooms.end()) {
                     Room& room = roomIt->second;
                     auto mit = room.members.find(h.uid);
@@ -275,7 +299,7 @@ int main(int argc, char** argv) {
                         const auto tit = room.members.find(target);
                         if (tit == room.members.end()) continue;
                         mit->second.lastSeen = now;
-                        sendTo(tit->second.pub, encodeRelayed(h.room, h.uid, s));
+                        sendTo(tit->second.pub, encodeRelayed(h.room, h.uid, s), h.region, h.auth);
                         ++relayed;
                     } else if (h.type == kBye) {
                         log("%s left room \"%s\"%s", mit->second.name, room.name, "");

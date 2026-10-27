@@ -16,6 +16,7 @@
 
 #include "cdrom.hpp"
 #include "disc.hpp"
+#include "game_profile.hpp"
 #include "gpu.hpp"
 #include "memcard.hpp"
 #include "r3000.hpp"
@@ -39,7 +40,8 @@ public:
     Spu spu;
     MemCard card;   // port 1; created formatted and empty unless an image is loaded
     // Game-library functions that reach into BIOS internals, replaced by returning a fixed value (address -> v0).
-    std::map<uint32_t, uint32_t> overrides = {{0x8004a2c4, 0}, {0x8004a2d8, 0}, {0x8004a364, 0}};
+    std::map<uint32_t, uint32_t> overrides = {{0x8004a2c4, 0}, {0x8004a2d8, 0}, {0x8004a364, 0}};   // library routines the platform answers itself (replaced by the profile's when the executable is loaded)
+    const cb2game::Profile* profile = &cb2game::ntsc();   // the release of the game that is loaded
 
     uint32_t istat = 0, imask = 0;
     uint64_t irqCount[11] = {};
@@ -185,7 +187,7 @@ private:
     // GPU read latch for GP0 transfer
     uint32_t cdPrevIrq = 0;
     uint64_t lastService = 0, nextVblank = 0, serviceAt = 0;   // serviceAt: devices are brought up to date every 64 cycles, on a grid that does not depend on how the run was split into calls
-    static constexpr uint64_t kFrameCycles = 564480;
+    uint64_t frameCycles = 564480;   // CPU cycles per vertical blank: the profile's (60 Hz for NTSC, 50 Hz for PAL)
 
     // BIOS state
     struct Event { uint32_t cls = 0, spec = 0, mode = 0, handler = 0; uint32_t status = 0; bool used = false; };

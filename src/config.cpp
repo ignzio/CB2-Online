@@ -1,6 +1,7 @@
 #include "config.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
@@ -29,6 +30,8 @@ bool Config::load(const std::string& exeDir) {
             if (eq == std::string::npos) continue;
             const std::string k = trim(line.substr(0, eq)), v = trim(line.substr(eq + 1));
             if (k == "game") game = v;
+            else if (k == "game_pal") gamePal = v;
+            else if (k == "region") { region = v; for (char& c : region) c = char(std::tolower(static_cast<unsigned char>(c))); }
             else if (k == "mod" && !v.empty()) mods.push_back(v);
             else if (k == "card") card = v;
             else if (k == "scale") scale = std::atoi(v.c_str());
@@ -99,23 +102,46 @@ bool Config::remember(const std::string& exeDir, const std::string& key, const s
 void Config::resolvePaths(const std::string& exeDir) {
     namespace fs = std::filesystem;
     const fs::path exe(exeDir);
-    auto holdsGame = [](const fs::path& p) { return fs::exists(p / "SCUS_941.54"); };
+    auto holds = [](const fs::path& p, const cb2game::Profile& g) { std::error_code ec; return fs::exists(p / g.exeName, ec); };
+    auto holdsAny = [&](const fs::path& p) { return holds(p, cb2game::ntsc()) || holds(p, cb2game::pal()); };
+    // `game`: as written, or next to the program, or <exe>\data (the layout of the packaged game folder)
     if (game.empty()) {
-        if (holdsGame(exe / "data")) game = (exe / "data").string();
-        else if (holdsGame(fs::path("data"))) game = "data";
-    } else if (fs::path(game).is_relative() && !holdsGame(game) && holdsGame(exe / game)) {
+        if (holdsAny(exe / "data")) game = (exe / "data").string();
+        else if (holdsAny(fs::path("data"))) game = "data";
+    } else if (fs::path(game).is_relative() && !holdsAny(game) && holdsAny(exe / game)) {
         game = (exe / game).string();
+    }
+    if (gameFromCommandLine) gamePal.clear();   // --game <folder> means exactly that folder, whichever release it holds
+    else if (gamePal.empty()) {
+        if (holdsAny(exe / "data-pal")) gamePal = (exe / "data-pal").string();
+        else if (holdsAny(fs::path("data-pal"))) gamePal = "data-pal";
+    } else if (fs::path(gamePal).is_relative() && !holdsAny(gamePal) && holdsAny(exe / gamePal)) {
+        gamePal = (exe / gamePal).string();
     }
     for (std::string& m : mods)
         if (fs::path(m).is_relative() && !fs::exists(m) && fs::exists(exe / m)) m = (exe / m).string();
+
+    // what is installed: a folder holds the release whose executable is in it (`game` may hold either; `game_pal` is meant for PAL)
+    haveNtsc = havePal = false;
+    ntscFolder.clear();
+    palFolder.clear();
+    for (const std::string& f : {game, gamePal}) {
+        if (f.empty()) continue;
+        if (!haveNtsc && holds(f, cb2game::ntsc())) { haveNtsc = true; ntscFolder = f; }
+        if (!havePal && holds(f, cb2game::pal())) { havePal = true; palFolder = f; }
+    }
+    const bool wantPal = region == "pal" || (region != "ntsc" && havePal);
+    profile = nullptr;
+    if (wantPal && havePal) profile = &cb2game::pal();
+    else if (haveNtsc) profile = &cb2game::ntsc();
+    else if (havePal) profile = &cb2game::pal();
+    if (profile) game = profile->region == cb2game::Region::Pal ? palFolder : ntscFolder;
 }
 
 std::string Config::validate() const {
-    namespace fs = std::filesystem;
-    static const char* kHelp = "\n\nThis program does not include the game. Copy the files of your own Crash Bandicoot 2 disc "
-                               "(SCUS_941.54, SYSTEM.CNF and the S0, S1, S2, S3 folders) into the 'data' folder next to Crash2.exe, then start it again.";
-    if (game.empty()) return std::string("Game files not found.") + kHelp;
-    if (!fs::exists(fs::path(game) / "SCUS_941.54")) return "SCUS_941.54 not found in " + game + kHelp;
+    static const char* kHelp = "\n\nThis program does not include the game. Copy the files of your own Crash Bandicoot 2 disc (SCUS_941.54 for the American release, or SCES_009.67 for the European one, "
+                               "SYSTEM.CNF and the S0, S1, S2, S3 folders) into the 'data' (American) or 'data-pal' (European) folder next to Crash2.exe, or start the game and choose the disc image; then start it again.";
+    if (!profile) return "No game files found (looked for SCUS_941.54 and SCES_009.67)." + std::string(kHelp);
     return {};
 }
 

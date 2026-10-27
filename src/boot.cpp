@@ -101,11 +101,18 @@ int main(int argc, char** argv) {
     std::string stop;
     uint64_t done = 0;
     while (done < limit && (!frameLimit || p.frames < frameLimit)) {
-        const uint64_t chunk = std::min<uint64_t>(1 << 14, limit - done);
+        const uint64_t chunk = std::min<uint64_t>(16381, limit - done);
         stop = p.run(chunk);
         done += chunk;
         ++hist[p.cpu.pc];
         if (!stop.empty()) break;
+    }
+    if (std::getenv("CB2_STEPDUMP")) {   // tool: the next instructions the CPU executes (where is it stuck?)
+        for (int i = 0; i < 40; ++i) {
+            std::printf("[step] pc %08x next %08x ins %08x r2 %08x r3 %08x r4 %08x ra %08x sr %08x istat %08x imask %08x\n", p.cpu.pc, p.cpu.nextPc, p.cpu.rd32(p.cpu.pc), p.cpu.r[2], p.cpu.r[3], p.cpu.r[4], p.cpu.r[31], p.cpu.cop0[12], p.istat, p.imask);
+            try { p.cpu.step(); } catch (const std::exception& e) { std::printf("[step] exception: %s\n", e.what()); break; }
+            std::printf("[step]   after: pc %08x next %08x ra %08x instructions %llu fault %d\n", p.cpu.pc, p.cpu.nextPc, p.cpu.r[31], (unsigned long long)p.cpu.instructions, int(p.cpu.fault));
+        }
     }
     if (!hwSitesOut.empty()) {
         FILE* f = std::fopen(hwSitesOut.c_str(), "w");

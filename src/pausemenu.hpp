@@ -1,8 +1,11 @@
 #pragma once
 // The in-game menu (Esc). It is drawn over the frozen game picture with the same look as the online lobby (ui.hpp); the game is paused while it
 // is open and the caller saves the settings when changed() says so.
-//   Main              Resume / Sound and picture / Graphics / Online (online play only) / Records / Controls / Report a bug / Main menu / Quit
-//   Sound and picture volume slider, display filter, fullscreen
+//   Main              Resume / Settings / Online (online play only) / Records / Controls / Report a bug / Main menu / Quit game
+//   Settings          Display / Sound and timer / Experimental (the unstable features)
+//   Display           fullscreen, widescreen, picture filter, textures, perspective, 60 fps smoothing, vsync
+//   Sound and timer   volume slider, level timer
+//   Experimental      Native world (UNSTABLE)
 //   Online            name tags, how solid the other players are (slider), the player list at the right edge
 //   Controls          keyboard and game pad bindings side by side; Enter binds the column under the cursor, a game pad button or key is then pressed
 // Keyboard, game pad and mouse all work: arrows / D-pad / hover to pick, Enter / A / click to choose, Left / Right / drag to move a slider, Esc / B /
@@ -29,7 +32,7 @@ struct Settings {
     bool smooth = false;     // 60 fps: an in-between picture every other vertical blank
     int textures = 0;        // 0 sharp, 1 smooth (bilinear texture filtering)
     bool perspective = false; // perspective-correct texturing
-    bool nativeWorld = false; // draw the level scenery natively from the level files instead of the game's own polygons (experimental)
+    bool nativeWorld = false; // draw the level scenery natively from the level files instead of the game's own polygons (unstable)
     bool widescreen = false;  // show the picture at the window's aspect ratio instead of 4:3
     bool vsync = true;       // wait for the monitor's refresh when showing a picture
     cb2input::Keys keys;     // keyboard and game pad bindings
@@ -46,6 +49,7 @@ public:
         bool online = false;                          // shows the online-only page
         std::function<bool()> isFullscreen;
         std::function<void()> toggleFullscreen;
+        std::string release;                          // "PAL" / "NTSC-U": shown in the corner
     };
 
     bool init(Settings* settings, const Context& context);   // needs the OpenGL context
@@ -76,15 +80,15 @@ public:
     cb2ui::Canvas& surface() { return canvas; }   // for the overlay (hud.hpp), which draws with the same font
 
 private:
-    enum class Page { Closed, Main, Sound, Graphics, Online, Records, Controls, Capture, ConfirmMenu, ConfirmQuit };
-    enum Item { kResume, kSound, kGraphics, kPerspective, kNative, kWide, kOnline, kRecords, kControls, kReport, kMainMenu, kQuit, kVolume, kFilter, kFullscreen, kTimer, kSmooth, kVsync, kTextures, kTags, kOpacity, kRoster, kBack };
+    enum class Page { Closed, Main, Settings, Sound, Graphics, Experimental, Online, Records, Controls, Capture, ConfirmMenu, ConfirmQuit };
+    enum Item { kResume, kSettings, kExperimental, kSound, kGraphics, kPerspective, kNative, kWide, kOnline, kRecords, kControls, kReport, kMainMenu, kQuit, kVolume, kFilter, kFullscreen, kTimer, kSmooth, kVsync, kTextures, kTags, kOpacity, kRoster, kBack };
     struct Hit { float x, y, w, h; int index; };
 
     cb2ui::Canvas canvas;
     Settings* s = nullptr;
     Context ctx;
     Page page = Page::Closed;
-    int sel = 0, mainSel = 0, controlsSel = 0, confirmSel = 1, column = 0;   // column: 0 keyboard, 1 game pad (Controls page)
+    int sel = 0, mainSel = 0, settingsSel = 0, controlsSel = 0, confirmSel = 1, column = 0;   // column: 0 keyboard, 1 game pad (Controls page)
     bool changed = false;
     Result result = Result::None;
     std::string message;
@@ -102,6 +106,7 @@ private:
 
     std::vector<Item> items() const;
     void setPage(Page p);
+    static Page parentOf(Page p) { return p == Page::Sound || p == Page::Graphics || p == Page::Experimental ? Page::Settings : Page::Main; }
     void adjust(Item item, int direction);
     void setSlider(Item item, float x);
     void activate(Item item);

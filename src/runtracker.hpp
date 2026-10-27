@@ -2,6 +2,8 @@
 // Times the player's runs through the levels of the real game: watches the game (level opens, level requests, player updates), keeps the
 // personal records, and tells the rest of the program what happened. Works offline and online. See docs/SPEEDRUN.md.
 #include <cstdint>
+
+#include "game_profile.hpp"
 #include <string>
 #include <vector>
 
@@ -38,8 +40,7 @@ public:
     const Run& lastRun() const { return last; }
     uint32_t bestMsFor(int level) const { const Best* b = records.find(level); return b ? b->bestMs : 0; }
 
-    static constexpr uint32_t kOpenLevel = 0x80012170, kObjectStep = 0x8001C718, kNextLevel = 0x80037DC8, kPlayerGlobal = 0x8006CB10,
-                              kCurrentLevel = 0x8005F3EC;   // the game's own "level that is loaded" variable
+    // engine addresses: game_profile.hpp, cb2game::current()
 
 private:
     psx::Platform& p;

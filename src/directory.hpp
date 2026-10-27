@@ -16,7 +16,7 @@ namespace cb2net {
 
 constexpr const char* kVersion = kVersionText;
 
-struct DirRoom { std::string name; int players = 0; std::vector<Endpoint> endpoints; std::string version, rendezvous; };
+struct DirRoom { std::string name; int players = 0; std::vector<Endpoint> endpoints; std::string version, rendezvous; bool locked = false; };
 struct DirServer { std::string name; int players = 0; Endpoint ep; std::string text; std::string version; };   // text = "ip:port"
 
 bool parseEndpoint(const std::string& text, Endpoint& out);   // "1.2.3.4:5678"
@@ -36,7 +36,8 @@ public:
     bool active() const { return running; }
 
     // Announce a room membership every ~15 s until clearMember(). `ip`/`port` are the public UDP address (from STUN).
-    void setMember(const std::string& room, uint32_t uid, const std::string& name, const std::string& ip, uint16_t port, const std::string& rendezvous);
+    // `locked`: the room asks for a password (only a hint for the list; the password never leaves the players). The release (localRegion()) is part of the room's identity.
+    void setMember(const std::string& room, uint32_t uid, const std::string& name, const std::string& ip, uint16_t port, const std::string& rendezvous, bool locked = false);
     void clearMember();
     // Keep the room / server list fresh (every ~3 s) while true.
     void wantList(bool on) { listWanted = on; wake(); }
@@ -63,7 +64,7 @@ private:
     mutable std::mutex mu;
     std::condition_variable cv;
     // shared state (under mu)
-    bool memberSet = false;
+    bool memberSet = false, mLocked = false;
     std::string mRoom, mName, mIp, mRendezvous;
     uint32_t mUid = 0;
     uint16_t mPort = 0;

@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "game_profile.hpp"
+
 namespace cb2run {
 
 constexpr int kNoLevel = 0xFF;
@@ -22,8 +24,10 @@ struct Run {
     bool finished = false;     // reached the end of the level; false = ran out of lives
 };
 
-// Frames to milliseconds at the console's 59.94 Hz.
-inline uint32_t framesToMs(uint64_t frames) { return uint32_t(frames * 1001ull / 60ull); }
+// Frames to milliseconds: the American release runs at 59.94 Hz, the European one at 50 Hz (their times are not comparable, so records are kept apart).
+inline uint32_t framesToMs(uint64_t frames) {
+    return cb2game::current().region == cb2game::Region::Pal ? uint32_t(frames * 20ull) : uint32_t(frames * 1001ull / 60ull);
+}
 
 class RunClock {
 public:

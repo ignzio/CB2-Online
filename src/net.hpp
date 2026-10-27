@@ -24,6 +24,7 @@ struct SessionOptions {
     std::string directory;         // URL of the lobby service (docs/LOBBY_PROTOCOL.md): our room is listed there and players can join through it
     std::vector<std::string> seeds;   // "ip:port" of players of the room to contact right away (from the directory's list)
     bool joinViaDirectory = false; // ask the directory to tell the members about us, so that both sides open the NAT at the same moment
+    std::string password;          // empty = an open room; otherwise only players who know it can join (see netproto.hpp)
 };
 
 class Session {
@@ -43,6 +44,9 @@ public:
     bool connected() const { return serverState() == 2 || !peers.empty(); }
     std::string status() const;
     const std::string& room() const { return roomName; }
+    bool locked() const { return key != 0; }
+    // True while somebody refused us for a wrong or missing password (and nobody has accepted us).
+    bool denied() const;
 
     void setLocal(const PlayerState& s) { local = s; }
     // Call every frame: receives packets, sends the local state at 30 Hz, drops players that went silent.
@@ -70,6 +74,9 @@ private:
     };
     uint64_t sock = ~0ull;
     uint32_t uid = 0, roomId = 0;
+    uint64_t key = 0;                       // the room's password key (0 = open)
+    double deniedAt = -1e9;
+    std::map<uint64_t, double> deniedSent;  // endpoint key -> when we last told it "wrong password"
     std::string roomName, playerName, rendezvousText;
     Endpoint server, priv;
     uint16_t port = 0;
@@ -90,6 +97,7 @@ private:
 
     void receive();
     void sendTo(const Endpoint& to, const std::vector<uint8_t>& data);
+    void refuse(const Endpoint& to);   // tells somebody whose packets carry the wrong tag (rate limited)
     Peer& peerFor(uint32_t peerUid, const std::string& name);
 };
 
@@ -105,12 +113,12 @@ public:
     void close();
     void update(double nowSeconds);              // call every frame: asks again every 2 s, collects answers
     // Rooms heard of within the last 6 s, most populated first. `fromServer` tells whether the rendezvous server listed it.
-    struct Room { std::string name; int players = 0; bool fromServer = false; };
+    struct Room { std::string name; int players = 0; bool fromServer = false; bool locked = false; };
     std::vector<Room> rooms() const;
     int serverState() const;                     // 0 no server set, 1 no answer yet, 2 answering
 
 private:
-    struct Heard { int players = 0; double at = 0; bool server = false; };
+    struct Heard { int players = 0; double at = 0; bool server = false, locked = false; };
     uint64_t sock = ~0ull;
     uint32_t uid = 0;
     std::string rendezvousText;

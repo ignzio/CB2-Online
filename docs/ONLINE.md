@@ -39,8 +39,10 @@ comes from a small HTTP lobby service whose address is built into the executable
 online list: **Play local** (this PC / local network) and the relay server below still work. If you want your own lobby service, the
 protocol is in `docs/LOBBY_PROTOCOL.md`; put your service's address in your own `local/directory.txt` and rebuild.
 
-Dedicated servers list themselves with `Crash2 Server.exe --announce <service address> --name "My server"` and need the UDP port open
-(an ingress rule on a cloud VM). Players never need to open ports: both sides send to each other at the same moment, which opens the path
+Dedicated servers list themselves: a `Crash2 Server.exe` built from this source tree with `local/directory.txt` announces itself to that service **by default**
+(`--no-announce` keeps it private; `--announce <service address>` and `--name "My server"` override; on Linux, `DIRECTORY=<service address> NAME="My server" sudo -E bash server/install.sh`).
+The server then shows up in everybody's lobby list within a minute, **provided its UDP port (7777 unless you chose another) is open to the internet**: an ingress rule on a cloud VM,
+or a port forward on a home router (`--public-port` if the outside port differs). A server announces itself only; it needs no game files and serves both releases. Players never need to open ports: both sides send to each other at the same moment, which opens the path
 through their routers (hole punching, with the public address learned from STUN). Pairs that still cannot connect need a relay: a
 `Crash2 Server.exe` whose address is built in as `local/rendezvous.txt` (or `rendezvous =` in `cb2.cfg`) forwards their packets.
 
@@ -56,6 +58,25 @@ through their routers (hole punching, with the public address learned from STUN)
 
 Once two players are connected the server is not needed: if it goes away they keep seeing each other (tested). New players cannot be
 introduced until it is back, and a relayed pair loses its path.
+
+## Rooms with a password
+
+*Create a room* asks for a name and then an optional password. A locked room shows a padlock in the list and asks for the password when you join. Wrong or missing
+password: the lobby returns with **WRONG PASSWORD** (or, if you were creating the room and the name is taken on the server with another password, a hint to pick another).
+
+What happens on the wire (`src/netproto.hpp`): the password never travels. Together with the room name it becomes a 64-bit key; every packet of a locked room carries a
+32-bit tag that only somebody with the key can compute, and players drop packets with a wrong tag (and answer with a "denied" packet, at most once every 2 s per address).
+The rendezvous server is given a one-way image of the key (the *verifier*) by whoever opens the room, and only lets players in whose verifier matches; the tag also rides along in
+relayed packets, so a stranger cannot inject packets through the relay. The lobby directory is only told *that* a room is locked, for the padlock.
+This keeps unwanted players out of a room. It is **not encryption**: somebody who can read your network traffic can read your Crash's position, and a short password can be
+guessed offline by anybody who captured a tag. Use a password you do not use anywhere else.
+
+## The two releases
+
+Players of the European (PAL) and the American (NTSC-U) release never share a room: the two games have different code and data, so the extra Crash of one cannot be put into the
+other. Every packet carries a one-byte release number and ignores the other release's packets; the rendezvous server keeps one list of rooms per release; the lobby directory
+takes a `region` field (`u` or `p`) and lists only the rooms of the asker's release. The release is the one the game is running (`region` in `cb2.cfg`). Addresses inside the
+game that the multiplayer module uses are per release: `src/game_profile.cpp`, [REGIONS.md](REGIONS.md).
 
 ## Rendezvous server (for example on an Oracle Cloud VM)
 
@@ -109,7 +130,7 @@ control Crash.
 
 ## How it works (`src/multiplayer.*`, `src/net.*`)
 
-- **Which Crash is yours.** The game keeps a pointer to the current player object at `0x8006CB10`. An older Crash (the cutscene's) stays
+- **Which Crash is yours.** (Addresses in this section are the American release's; the European ones are in `src/game_profile.cpp`.) The game keeps a pointer to the current player object at `0x8006CB10`. An older Crash (the cutscene's) stays
   intact in memory after the engine drops it, so the module follows that pointer instead of scanning memory.
 - **Local state.** When the game updates Crash's object (hook on `0x8001C718`) the module reads position, rotation, scale,
   animation (frame group relative to the object's entry, frame number) and sends it, 30 times a second, over UDP to every
@@ -117,7 +138,7 @@ control Crash.
   silent for 10 s (a crash, a cable; long enough that a slow level load on someone's PC does not make everyone delete and re-create
   their Crash) disappears anyway. While you are in a menu or a loading screen you still announce your name, so
   the others do not keep drawing your old position. The state packet also carries the run data of [SPEEDRUN.md](SPEEDRUN.md)
-  (protocol version 2: v0.3 and v0.4 clients do not see each other).
+  (protocol version 3: older clients do not see this one; the format changed for passwords and the two releases).
 - **Loading safety.** Creating or deleting a puppet while the game streams a level from the disc is postponed until the disc is idle
   (at most 5 s), every engine call the module makes has an instruction budget, and a call that fails is rolled back and retried later, so
   a problem with a puppet can no longer take the game down.

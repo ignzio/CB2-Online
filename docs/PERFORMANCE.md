@@ -1,6 +1,6 @@
 # Speed, smoothness and 60 fps
 
-## 60 fps smoothing (*Esc → Sound and picture → 60 fps smoothing*, `smooth = on` in `cb2.cfg`)
+## 60 fps smoothing (*Esc → Settings → Display → 60 fps smoothing*, `smooth = on` in `cb2.cfg`)
 
 Crash Bandicoot 2 draws a new picture every second vertical blank, about 30 per second. With smoothing on, the picture in between is drawn too, so
 the screen changes 60 times a second.
@@ -52,7 +52,7 @@ second; `CB2_FAKEHZ=160` pretends to have such a monitor, `CB2_CONTINUOUS=1` for
   A true widescreen mode needs the engine's culling widened, which is a hack into the game code per level (not done).
 - **PGXP depth buffer** is not implemented: the game depends on painter's-algorithm order, and a depth buffer from the GTE depth would change what is drawn on top.
 
-## Native world (Esc -> Graphics, `native_world = on`, experimental)
+## Native world (Esc → Settings → Experimental, `native_world = on`, **unstable**)
 
 The level scenery is drawn from the level's .NSF file instead of from the game's projected polygons (`src/nativeworld.cpp`). It does not make the game faster (the GTE costs 0.2-0.4 ms of a
 3-4 ms frame); what it gives is quality and flexibility.
@@ -94,7 +94,7 @@ A whole level cannot simply be kept in memory: the console has 2 MiB of RAM and 
 can be removed is the waiting. What is left of a load is the game's own CPU work, which no disc setting changes. (At 32x the boot sequence was delayed, so the
 limit is 24.) The host side helps too: the first time the game reads a file, a helper thread reads the whole file once, so the operating system's cache holds it
 before the game gets there (a cold disk or a virus scanner had made the first read of each area stall for half a second).
-## Textures (*Esc → Sound and picture → Textures*, `textures = smooth` in `cb2.cfg`)
+## Textures (*Esc → Settings → Display → Textures*, `textures = smooth` in `cb2.cfg`)
 
 *Sharp* reads every texel as the console does (blocky when enlarged, the original look). *Smooth* filters the textures bilinearly in the renderer's
 shader (`src/glrender.cpp`): the four texels around each sample are blended, texels that are transparent do not take part (so the edges of cut-out

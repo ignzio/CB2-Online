@@ -8,6 +8,8 @@
 // It hooks the game's per-object update routine (see Platform::addHook), so it needs the interpreter (not the translated engine).
 // Offsets of the NTSC-U executable (SCUS_941.54): see docs/ONLINE.md.
 #include <cstdint>
+
+#include "game_profile.hpp"
 #include <map>
 #include <string>
 #include <vector>
@@ -27,6 +29,7 @@ struct Options {
     std::string directory;   // URL of the lobby service (docs/LOBBY_PROTOCOL.md): lists this room for others and carries the join hand-shake
     std::vector<std::string> seeds;   // "ip:port" of players of this room taken from the directory's list
     bool joinViaDirectory = false;
+    std::string password;    // empty = an open room (see netproto.hpp for what it does and does not protect)
     // Test mode without a network: a ghost player copies your Crash a few steps to the side (fake = 1) or, with fake = 2, also
     // comes and goes every few seconds to exercise creating and removing the extra Crash.
     int fake = 0;
@@ -54,19 +57,11 @@ public:
     // Where the time goes (CB2_FRAMELOG): milliseconds spent in manage() / buildTags() and how many puppets were created / removed since the start.
     struct Profile { uint64_t failures = 0, deferred = 0; double manageMs = 0, tagsMs = 0; uint64_t spawns = 0, kills = 0, tickCalls = 0; double tickMs = 0; } prof;
     int opacity = 100;                                         // how solid the other players' Crashes are drawn (percent, 10..100)
-    double levelSeconds() const { return double(p.frames - levelStartFrame) / 59.94; }   // game time in the current level (stands still while paused)
+    double levelSeconds() const { return double(p.frames - levelStartFrame) / cb2game::current().frameRate; }   // game time in the current level (stands still while paused)
     bool showTags = true;                                      // the pause menu's "Name tags"
 
     // Addresses in the executable
-    static constexpr uint32_t kObjectStep = 0x8001C718;    // runs one object: a0 = object
-    static constexpr uint32_t kObjectStepReturn = 0x80018AD4;   // where the object loop continues afterwards
-    static constexpr uint32_t kAfterAnimate = 0x8001DDC0;    // in the object update: the frame's model has just been looked up (a0 = s1 = object)
-    static constexpr uint32_t kPlayerGlobal = 0x8006CB10;    // pointer to the current player object
-    static constexpr uint32_t kRunScript = 0x8003A014;       // script interpreter entry (a0 = object)
-    static constexpr uint32_t kCreateObject = 0x80019800;  // (parent, type, subtype, argc, [stack] args, flag) -> object
-    static constexpr uint32_t kDestroyObject = 0x80019E08; // (object, 0)
-    static constexpr uint32_t kOpenLevel = 0x80012170;     // (0 = .NSD, level id)
-    static constexpr uint32_t kPuppetParent = 0x8006CB20;  // list head the HUD objects hang from: always walked by the object loop
+    // The addresses of the engine's routines and globals depend on the release of the game (NTSC-U / PAL): game_profile.hpp, cb2game::current().
     static constexpr uint32_t kPuppetSubtype = 1;          // Crash's script with subtype 1 gives a second Crash object
 
 private:

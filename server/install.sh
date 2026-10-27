@@ -6,11 +6,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PORT="${PORT:-7777}"
+# DIRECTORY=https://your-lobby.workers.dev lists the server in the game's server list (the same address the game was built with); NAME="My server" is its title there.
+DIRECTORY="${DIRECTORY:-}"
+NAME="${NAME:-Crash 2 server}"
+ANNOUNCE="--no-announce"
+[ -n "$DIRECTORY" ] && ANNOUNCE="--announce ${DIRECTORY} --name \"${NAME}\""
 
 command -v g++ >/dev/null || { apt-get update -y && apt-get install -y g++; }
 g++ -O2 -std=c++17 -Wall src/server.cpp -o /usr/local/bin/cb2_server
 id cb2 >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin cb2
-sed "s/@PORT@/${PORT}/" server/cb2-server.service > /etc/systemd/system/cb2-server.service
+sed -e "s/@PORT@/${PORT}/" -e "s|@ANNOUNCE@|${ANNOUNCE}|" server/cb2-server.service > /etc/systemd/system/cb2-server.service
 systemctl daemon-reload
 systemctl enable cb2-server
 systemctl restart cb2-server
@@ -26,4 +31,5 @@ echo
 echo "Installed. Status:  systemctl status cb2-server      Log:  journalctl -u cb2-server -f"
 echo "Still to do in the Oracle console: VCN > Security List (or Network Security Group) > add an INGRESS rule:"
 echo "    Source CIDR 0.0.0.0/0, protocol UDP, destination port ${PORT}"
-echo "Then on each player's PC set   rendezvous = <the VM's public IP>   in cb2.cfg (or type it in the lobby)."
+if [ -n "$DIRECTORY" ]; then echo "The server lists itself in $DIRECTORY: it shows up in the game's server list within a minute once the port above is open."; fi
+echo "Otherwise on each player's PC set   rendezvous = <the VM's public IP>   in cb2.cfg (or type it in the lobby)."

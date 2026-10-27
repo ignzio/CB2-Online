@@ -119,6 +119,9 @@ bool Session::start(const SessionOptions& options, std::string& error) {
     if (roomName.empty()) roomName = "PUBLIC";
     roomName = roomName.substr(0, kNameLength - 1);
     roomId = roomHash(roomName);
+    key = passwordKey(roomName, options.password);
+    deniedAt = -1e9;
+    deniedSent.clear();
     playerName = options.name.substr(0, kNameLength - 1);
     std::random_device rd;
     uid = (uint32_t(rd()) ^ uint32_t(std::chrono::steady_clock::now().time_since_epoch().count()) * 2654435761u);
@@ -156,13 +159,29 @@ bool Session::start(const SessionOptions& options, std::string& error) {
     return true;
 }
 
-void Session::sendTo(const Endpoint& to, const std::vector<uint8_t>& data) {
+void Session::sendTo(const Endpoint& to, const std::vector<uint8_t>& packet) {
     if (!active() || !to.valid()) return;
+    std::vector<uint8_t> data = packet;
+    stampPacket(data, localRegion(), authTag(key, roomId, uid));
     sockaddr_in a{};
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = to.ip;
     a.sin_port = to.port;
     sendto(SOCKET(sock), reinterpret_cast<const char*>(data.data()), int(data.size()), 0, reinterpret_cast<sockaddr*>(&a), sizeof a);
+}
+
+void Session::refuse(const Endpoint& to) {
+    double& last = deniedSent[to.key()];
+    if (now - last < 2.0) return;
+    last = now;
+    if (deniedSent.size() > 256) deniedSent.clear();
+    sendTo(to, encodeDenied(roomId, uid));
+}
+
+bool Session::denied() const {
+    if (now - deniedAt > 10.0) return false;
+    for (const auto& [id, p] : peers) if (p.haveState) return false;
+    return true;
 }
 
 void Session::close() {
@@ -239,8 +258,9 @@ void Session::receive() {
         }
         Header h;
         if (!parseHeader(buf, size_t(n), h)) continue;
+        if (h.region != localRegion()) continue;   // the other release of the game: a different world
         if (h.type == kQuery) {   // a lobby asks which room we are in
-            if (isListRequest(size_t(n)) && h.uid != uid) sendTo(e, encodeRoomInfo(uid, roomName, uint8_t(std::min<size_t>(peers.size() + 1, 255))));
+            if (isListRequest(size_t(n)) && h.uid != uid) sendTo(e, encodeRoomInfo(uid, roomName, uint8_t(std::min<size_t>(peers.size() + 1, 255)), key != 0));
             continue;
         }
         if (h.room != roomId) continue;
@@ -249,6 +269,7 @@ void Session::receive() {
         switch (h.type) {
         case kState: {
             if (h.uid == uid || fromServer) break;   // our own broadcast coming back
+            if (h.auth != authTag(key, roomId, h.uid)) { refuse(e); break; }   // wrong or missing password
             PlayerState s;
             if (!decodeState(buf, size_t(n), s)) break;
             Peer& p = peerFor(h.uid, s.name);
@@ -260,7 +281,7 @@ void Session::receive() {
             break;
         }
         case kRelayed: {
-            if (!fromServer) break;
+            if (!fromServer || h.auth != authTag(key, roomId, h.uid)) break;
             PlayerState s;
             if (!decodeState(buf, size_t(n), s)) break;
             Peer& p = peerFor(h.uid, s.name);
@@ -270,6 +291,9 @@ void Session::receive() {
             p.lastSeen = p.lastRelayed = now;
             break;
         }
+        case kDenied:
+            if (fromServer || h.uid != uid) deniedAt = now;   // the server answers with our own uid
+            break;
         case kBye: {
             auto it = peers.find(h.uid);
             if (it != peers.end() && (it->second.chosen == e || fromServer)) peers.erase(it);
@@ -308,7 +332,7 @@ void Session::update(double t) {
     }
     if (server.valid() && now - lastRegister >= kRegisterInterval) {
         lastRegister = now;
-        sendTo(server, encodeRegister(roomId, uid, roomName, playerName, priv));
+        sendTo(server, encodeRegister(roomId, uid, roomName, playerName, priv, passwordVerifier(key)));
     }
 
     if (std::getenv("CB2_NETDEBUG") && now - lastDebug >= 2.0) {
@@ -329,7 +353,7 @@ void Session::update(double t) {
     // lobby directory: announce our room with our public address, learn who wants to join, and join a room found in the list
     if (directoryClient.active()) {
         if (pub.valid()) {
-            directoryClient.setMember(roomName, uid, playerName, ipText(pub), ntohs(pub.port), rendezvousText);
+            directoryClient.setMember(roomName, uid, playerName, ipText(pub), ntohs(pub.port), rendezvousText, key != 0);
             if (wantJoin && !joinSent) {
                 joinSent = true;
                 directoryClient.requestJoin(roomName, ipText(pub), ntohs(pub.port));
@@ -422,6 +446,7 @@ void RoomBrowser::receive() {
         e.port = from.sin_port;
         Header h;
         if (!parseHeader(buf, size_t(n), h)) continue;
+        if (h.region != localRegion()) continue;
         if (h.type == kRooms && server.valid() && e == server) {
             std::vector<RoomEntry> list;
             if (!decodeRooms(buf, size_t(n), list)) continue;
@@ -433,6 +458,7 @@ void RoomBrowser::receive() {
                 hd.players = std::max(hd.players, int(r.players));
                 hd.at = now;
                 hd.server = true;
+                hd.locked = r.locked;
                 display[up] = r.name;
             }
         } else if (h.type == kRoomInfo) {
@@ -442,6 +468,7 @@ void RoomBrowser::receive() {
             for (char& c : up) c = char(std::toupper(static_cast<unsigned char>(c)));
             Heard& hd = heard[up];
             if (now - hd.at > 0.1 || !hd.server) hd.players = std::max(hd.players, int(r.players));
+            hd.locked = hd.locked || r.locked;
             hd.at = now;
             display[up] = r.name;
         }
@@ -459,7 +486,8 @@ void RoomBrowser::update(double t) {
     }
     if (now - lastAsk >= 2.0) {
         lastAsk = now;
-        auto send = [&](const Endpoint& to, const std::vector<uint8_t>& d) {
+        auto send = [&](const Endpoint& to, std::vector<uint8_t> d) {
+            stampPacket(d, localRegion(), 0);   // only rooms of our release answer
             sockaddr_in a{};
             a.sin_family = AF_INET;
             a.sin_addr.s_addr = to.ip;
@@ -489,6 +517,8 @@ void Session::close() {}
 void Session::abandon() {}
 void Session::addSeed(const Endpoint&) {}
 void Session::sendTo(const Endpoint&, const std::vector<uint8_t>&) {}
+void Session::refuse(const Endpoint&) {}
+bool Session::denied() const { return false; }
 void Session::receive() {}
 void Session::update(double) {}
 Session::Peer& Session::peerFor(uint32_t, const std::string&) { static Peer p; return p; }
@@ -530,6 +560,7 @@ std::vector<RoomBrowser::Room> RoomBrowser::rooms() const {
         r.name = d != display.end() ? d->second : up;
         r.players = hd.players;
         r.fromServer = hd.server;
+        r.locked = hd.locked;
         out.push_back(r);
     }
     std::sort(out.begin(), out.end(), [](const Room& a, const Room& b) { return a.players != b.players ? a.players > b.players : a.name < b.name; });

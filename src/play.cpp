@@ -181,7 +181,7 @@ int main(int argc, char** argv) {
     bool nativeCode = false;                  // --native: run the translated engine (identical output, not faster yet)
     for (int i = first; i < argc; ++i) {
         const bool more = i + 1 < argc;
-        if (!std::strcmp(argv[i], "--game") && more) cfg.game = argv[++i];
+        if (!std::strcmp(argv[i], "--game") && more) { cfg.game = argv[++i]; cfg.gameFromCommandLine = true; }
         else if (!std::strcmp(argv[i], "--import") && more) importImage = argv[++i];
         else if (!std::strcmp(argv[i], "--load-state") && more) loadStatePath = argv[++i];
         else if (!std::strcmp(argv[i], "--poke") && more) {   // FRAME:hexaddr:hexvalue - debugging: write a word of guest memory at that frame
@@ -287,17 +287,19 @@ int main(int argc, char** argv) {
         std::string err = cfg.validate();
         const bool wantImport = !importImage.empty() || (!err.empty() && !hidden);
         if (wantImport) {
-            const std::string dataDir = (std::filesystem::path(exeDir) / "data").string();
-            if (importImage.empty() && cb2import::ask("The game files were not found.\n\nThis program does not include the game. Choose your own Crash Bandicoot 2 (NTSC-U) disc image "
-                                                      "(.cue/.bin or .iso) and the files will be copied for you, once.\n\nPress OK to choose the disc image."))
+            const std::string dataDir = (std::filesystem::path(exeDir) / cb2game::ntsc().folderName).string(), dataDirPal = (std::filesystem::path(exeDir) / cb2game::pal().folderName).string();
+            if (importImage.empty() && cb2import::ask("The game files were not found.\n\nThis program does not include the game. Choose your own Crash Bandicoot 2 disc image - the European (PAL) or the American (NTSC-U) one "
+                                                      "(.cue/.bin or .iso) - and the files will be copied for you, once.\n\nPress OK to choose the disc image."))
                 importImage = cb2import::pickImage(exeDir);
             if (!importImage.empty()) {
-                const cb2import::Result r = cb2import::importDisc(importImage, dataDir);
+                const cb2import::Result r = cb2import::importDisc(importImage, dataDir, {}, dataDirPal);
                 if (r.ok) {
-                    cfg.game = dataDir;
-                    cfg.remember(exeDir, "game", "data");
+                    const bool isPal = r.profile->region == cb2game::Region::Pal;
+                    cfg.remember(exeDir, isPal ? "game_pal" : "game", r.profile->folderName);
+                    (isPal ? cfg.gamePal : cfg.game) = r.folder;
+                    cfg.resolvePaths(exeDir);
                     err = cfg.validate();
-                    if (err.empty() && !hidden) cb2import::inform("Done: " + std::to_string(r.files) + " game files were copied to\n" + dataDir + "\n\nThe game starts now. You do not need the disc image any more.");
+                    if (err.empty() && !hidden) cb2import::inform("Done: " + std::to_string(r.files) + " files of the " + r.profile->title + " release were copied to\n" + r.folder + "\n\nThe game starts now. You do not need the disc image any more.");
                 } else {
                     psx::showError("The game files could not be imported: " + r.error);
                     return 2;
@@ -317,19 +319,22 @@ int main(int argc, char** argv) {
     p.echoPrintf = false;
     p.card.path = cardPath;
     if (!p.card.load()) p.card.save();   // a missing card file starts as a new, formatted card
-    std::string exe = folder + "\\SCUS_941.54";
-    for (const auto& m : mods) if (std::filesystem::exists(m + "\\SCUS_941.54")) exe = m + "\\SCUS_941.54";
+    const cb2game::Profile& release = cfg.profile ? *cfg.profile : cb2game::ntsc();   // a packed executable carries the American release
+    const std::string exeName = release.exeName;
+    cb2net::localRegion() = uint8_t(release.region);   // players of the two releases never share a room
+    std::string exe = folder + "\\" + exeName;
+    for (const auto& m : mods) if (std::filesystem::exists(m + "\\" + exeName)) exe = m + "\\" + exeName;
     if (bundled) {
         std::vector<uint8_t> image;
-        const bool modExe = exe != folder + "\\SCUS_941.54";
-        const bool ok = modExe ? p.loadExe(exe) : (bundle.read("SCUS_941.54", image) && p.loadExeImage(image));
+        const bool modExe = exe != folder + "\\" + exeName;
+        const bool ok = modExe ? p.loadExe(exe) : (bundle.read(exeName, image) && p.loadExeImage(image));
         if (!ok) { psx::showError("cannot load the game executable from the packed data"); return 2; }
         if (!p.mountBundle(bundle.file, bundle.files, mods)) { psx::showError("cannot read the packed game data"); return 2; }
     } else {
         if (!p.loadExe(exe)) { std::fprintf(stderr, "cannot load %s\n", exe.c_str()); psx::showError("cannot load " + exe); return 2; }
         if (!p.mountDisc(folder, mods)) { std::fprintf(stderr, "cannot mount %s\n", folder.c_str()); psx::showError("cannot mount " + folder); return 2; }
     }
-    if (nativeCode && !interpOnly) {
+    if (nativeCode && !interpOnly && release.region == cb2game::Region::Ntsc) {   // the translated engine code is the American release's
         if (p.enableNative()) p.yieldOnVblank = true;
         else std::fprintf(stderr, "no translated engine code linked in (run tools/recomp.py); using the interpreter\n");
     }
@@ -401,7 +406,7 @@ int main(int argc, char** argv) {
     // Online play hooks the original game's object update, which only the interpreter runs.
     cb2mp::Multiplayer mp(p);
     // Personal records and the level timer work offline too; they need the interpreter (the hooks), like online play.
-    cb2run::Tracker tracker(p, (std::filesystem::path(exeDir) / "records.txt").string());
+    cb2run::Tracker tracker(p, (std::filesystem::path(exeDir) / (release.region == cb2game::Region::Pal ? "records-pal.txt" : "records.txt")).string());   // 50 Hz times are not 60 Hz times: one file per release
     if (!nativeCode) tracker.install();
     mp.setTracker(&tracker);
     bool onlineStarted = false;
@@ -482,6 +487,7 @@ int main(int argc, char** argv) {
     bool pairValid = false;
     uint64_t pairFrames = 0;
     double nextPresent = 0;
+    const double emuRate = release.frameRate;   // vertical blanks per second of the release that is running
     const bool forceContinuous = std::getenv("CB2_CONTINUOUS") != nullptr;
     auto monitorHz = [&]() -> double {
         if (const char* f = std::getenv("CB2_FAKEHZ")) return std::atof(f);
@@ -522,6 +528,7 @@ int main(int argc, char** argv) {
     {
         cb2menu::PauseMenu::Context mc;
         mc.online = mp.active();
+    mc.release = release.region == cb2game::Region::Pal ? "PAL" : "NTSC-U";
         mc.isFullscreen = [&] { return glfwGetWindowMonitor(win) != nullptr; };
         mc.toggleFullscreen = toggleFullscreen;
         if (!menu.init(&settings, mc)) std::fprintf(stderr, "the in-game menu could not start\n");
@@ -627,7 +634,7 @@ int main(int argc, char** argv) {
     refreshRecords();
     // Save states (F5 save, F9 load, F6 next slot): practice and test runs start from any moment of the game. Files: <exe folder>\states\slotN.cb2state
     int stateSlot = 1;
-    auto slotPath = [&](int n) { return (std::filesystem::path(exeDir) / "states" / ("slot" + std::to_string(n) + ".cb2state")).string(); };
+    auto slotPath = [&](int n) { return (std::filesystem::path(exeDir) / "states" / ((release.region == cb2game::Region::Pal ? "pal-slot" : "slot") + std::to_string(n) + ".cb2state")).string(); };
     auto doSave = [&](const std::string& path) {
         const std::vector<uint8_t> extra = tracker.saveExtra();
         std::string err;
@@ -672,7 +679,7 @@ int main(int argc, char** argv) {
         {   // what a crash report should say about the game's state
             static double lastLive = 0;
             cb2crash::live.frame = p.frames;
-            cb2crash::live.level = p.peek32(0x8005F3ECu) & 0xFFu;
+            cb2crash::live.level = p.peek32(cb2game::current().currentLevel) & 0xFFu;
             cb2crash::live.guestPc = p.cpu.pc;
             cb2crash::setPhase(menu.isOpen() ? "menu" : "playing");
             static const uint64_t testCrash = std::getenv("CB2_TESTCRASH") ? std::strtoull(std::getenv("CB2_TESTCRASH"), nullptr, 10) : 0;   // tool: crash on purpose at this frame (tries the crash report)
@@ -762,16 +769,16 @@ int main(int argc, char** argv) {
             mp.tick();
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
         } else {
-        // Emulation is paced against the wall clock at the console's 59.94 Hz so the monitor refresh does not matter.
+        // Emulation is paced against the wall clock at the console's own rate (59.94 Hz NTSC, 50 Hz PAL) so the monitor refresh does not matter.
         // Holding Tab runs unthrottled (fast-forward).
         fast = glfwGetKey(win, GLFW_KEY_TAB) == GLFW_PRESS || (captureFrame != 0 && (!paceFrom || p.frames < paceFrom));
-        const double due = fast ? 4.0 : (glfwGetTime() - t0) * 59.94 - double(p.frames - base);
+        const double due = fast ? 4.0 : (glfwGetTime() - t0) * emuRate - double(p.frames - base);
         continuous = settings.smooth && useHires && showHires && pairValid && !fast && !captureMid && (hz >= 90.0 || forceContinuous);
         if (due < 1.0 && !continuous) {
             glfwPollEvents();
             p.padButtons = padNow();
             // sleep while the next frame is still a few milliseconds away, then spin for the rest: the sleep alone is too coarse to keep an even rhythm
-            if ((1.0 - due) / 59.94 > 0.0025) std::this_thread::sleep_for(std::chrono::milliseconds(1)); else std::this_thread::yield();
+            if ((1.0 - due) / emuRate > 0.0025) std::this_thread::sleep_for(std::chrono::milliseconds(1)); else std::this_thread::yield();
             continue;
         }
         if (due > 8.0 || fast) { t0 = glfwGetTime(); base = p.frames; }
@@ -801,7 +808,7 @@ int main(int argc, char** argv) {
         }
         msRun += since(runBegan);
         if (p.cpu.gteSamples2 == &nwSamples) {
-            const uint32_t lvl = p.peek32(0x8005F3ECu) & 0xFFu;
+            const uint32_t lvl = p.peek32(cb2game::current().currentLevel) & 0xFFu;
             if (lvl != nwTried) {
                 nwTried = lvl;
                 std::vector<uint8_t> file;
@@ -819,7 +826,7 @@ int main(int argc, char** argv) {
                 // the samples of the level's projections, in runs of one camera matrix (a pass can hold the end of one frame and the start of the next)
                 static const bool nwLog = std::getenv("CB2_NWLOG") != nullptr;
                 float camGame[3];
-                for (int k = 0; k < 3; ++k) camGame[k] = float(int32_t(p.peek32(0x80060768u + 4u * uint32_t(k))));
+                for (int k = 0; k < 3; ++k) camGame[k] = float(int32_t(p.peek32(cb2game::current().cameraPos + 4u * uint32_t(k))));
                 std::vector<std::array<int, 3>> vs;
                 float runFar = 0, passFar = 0;
                 std::vector<std::array<float, 2>> runPts;
@@ -852,7 +859,8 @@ int main(int argc, char** argv) {
                 };
                 for (const auto& s : nwSamples) {
                     static const uint32_t pcMask = std::getenv("CB2_NWPC") ? uint32_t(std::strtoul(std::getenv("CB2_NWPC"), nullptr, 10)) : 7u;   // tool: which of the three scenery projections to use
-                    if (!(((pcMask & 1) && s.pc == 0x80042420u) || ((pcMask & 2) && s.pc == 0x800426A0u) || ((pcMask & 4) && s.pc == 0x8004274Cu))) continue;
+                    const auto& sp = cb2game::current().sceneryProjection;
+                    if (!(((pcMask & 1) && s.pc == sp[0]) || ((pcMask & 2) && s.pc == sp[1]) || ((pcMask & 4) && s.pc == sp[2]))) continue;
                     if (first && std::memcmp(first->rt, s.rt, sizeof s.rt) != 0) flushRun();
                     if (!first) first = &s;
                     vs.push_back({s.vx, s.vy, s.vz});
@@ -904,7 +912,7 @@ int main(int argc, char** argv) {
         }
         if (sessFile && p.cpu.gteSamples == &sessSamples) {
             p.cpu.gteSamples = nullptr;
-            std::fprintf(sessFile, "F %llu L %u C %d %d %d\n", (unsigned long long)p.frames, p.peek32(0x8005F3ECu) & 0xFFu, int(p.peek32(0x80060768u)), int(p.peek32(0x8006076Cu)), int(p.peek32(0x80060770u)));
+            std::fprintf(sessFile, "F %llu L %u C %d %d %d\n", (unsigned long long)p.frames, p.peek32(cb2game::current().currentLevel) & 0xFFu, int(p.peek32(cb2game::current().cameraPos)), int(p.peek32(cb2game::current().cameraPos + 4)), int(p.peek32(cb2game::current().cameraPos + 8)));
             size_t s0 = 0;
             for (size_t n = 1; n <= sessSamples.size(); ++n) {
                 const auto& a = sessSamples[s0];
@@ -1031,7 +1039,7 @@ int main(int argc, char** argv) {
             const bool contMode = settings.smooth && useHires && showHires && !captureMid && (hz >= 90.0 || forceContinuous);
             if (flipped && contMode && interp.canInterpolate() && interp.flipStamp() == uint32_t(p.gpu.vblankCount)) { pairValid = true; pairFrames = p.frames; }
             if (contMode && pairValid && !fast) {
-                const double e = (glfwGetTime() - t0) * 59.94 + double(base);
+                const double e = (glfwGetTime() - t0) * emuRate + double(base);
                 const float tt = float(std::max(0.0, std::min(1.0, 1.0 - (e - double(pairFrames)) / 2.0)));
                 lastTt = tt;
                 if (tt > 0.002f) {

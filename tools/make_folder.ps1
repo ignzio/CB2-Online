@@ -1,6 +1,7 @@
 param(
     [string]$Game = "",
-    [string]$Out = "dist\Crash2"
+    [string]$Out = "dist\Crash2",
+    [string]$GamePal = ""   # a folder with the European release (SCES_009.67, SYSTEM.CNF, S0..S3); copied to data-pal when it exists
 )
 # Builds the game folder: the windowed player (Crash2.exe, with the crate icon), your game data in data\, the settings file and
 # launchers for playing alone, hosting and joining. Run after
@@ -27,6 +28,12 @@ foreach ($f in "S0", "S1", "S2", "S3", "SCUS_941.54", "SYSTEM.CNF") {
 }
 Get-ChildItem $Game -File | Where-Object { $_.Name -match '^(CRASH|S\d+|SCUS|SYSTEM)' -and -not (Test-Path (Join-Path $data $_.Name)) } |
     ForEach-Object { Copy-Item $_.FullName (Join-Path $data $_.Name) -Force }
+if (-not $GamePal) { $GamePal = Join-Path $root "build\Release\data-pal" }   # what the disc importer produced while testing
+if (Test-Path (Join-Path $GamePal "SCES_009.67")) {
+    $dataPal = Join-Path $out "data-pal"
+    New-Item -ItemType Directory -Force $dataPal | Out-Null
+    foreach ($f in "S0", "S1", "S2", "S3", "SCES_009.67", "SYSTEM.CNF") { $src = Join-Path $GamePal $f; if (Test-Path $src) { Copy-Item $src (Join-Path $dataPal $f) -Recurse -Force } }
+}
 
 if (-not (Test-Path (Join-Path $out "cb2.cfg"))) {
 @"

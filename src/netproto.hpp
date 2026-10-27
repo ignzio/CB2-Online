@@ -12,7 +12,7 @@
 
 namespace cb2net {
 
-constexpr const char* kVersionText = "2";   // game protocol version; the lobby directory only offers lobbies of the same version
+constexpr const char* kVersionText = "3";   // game protocol version; the lobby directory only offers lobbies of the same version
 constexpr uint16_t kDefaultPort = 7777;   // rendezvous server port; the game listens on the first free port of kLanPorts
 constexpr int kLanPorts = 10;             // 7777..7786: tried by LAN / same-PC discovery
 constexpr int kNameLength = 16;           // including the terminating zero
@@ -48,7 +48,11 @@ struct Endpoint {
     uint64_t key() const { return (uint64_t(ip) << 16) | port; }
 };
 
-constexpr uint32_t kMagic = 0x324D4243;   // "CBM2"
+// The release of the game a player runs (cb2game::Region): the two releases differ in their game data, so their players never share a room. Set once at start-up.
+inline uint8_t& localRegion() { static uint8_t r = 0; return r; }
+inline const char* regionText(uint8_t region) { return region == 1 ? "p" : "u"; }   // the lobby service's name for it
+
+constexpr uint32_t kMagic = 0x334D4243;   // "CBM3"
 enum PacketType : uint8_t {
     kState = 1,      // player -> player: header + entry (also used to say hello, and broadcast on the LAN)
     kBye = 2,        // player -> everybody: I am leaving
@@ -60,14 +64,40 @@ enum PacketType : uint8_t {
     kRooms = 8,      // server -> lobby: header + the rooms (name, number of players)
     kQuery = 9,      // lobby -> players on this PC / network: "which room are you in?" (also padded)
     kRoomInfo = 10,  // player -> lobby: header + room name + number of players in it
+    kDenied = 11,    // server or player -> a player who tried to join: wrong password (header only)
 };
-constexpr size_t kHeaderSize = 4 + 1 + 4 + 4;   // magic, type, room, uid
+constexpr size_t kHeaderSize = 4 + 1 + 1 + 4 + 4 + 4;   // magic, type, region, room, uid, auth
 constexpr size_t kEntrySize = 1 + 1 + kNameLength + 9 * 4 + 2 * 4 + 4 + 4 + 4 + 4;
 constexpr size_t kPeerEntrySize = 4 + kNameLength + 6 + 6;
 constexpr size_t kMaxPeersPerReply = 15;
-constexpr size_t kRoomEntrySize = kNameLength + 1;
+constexpr size_t kRoomEntrySize = kNameLength + 2;   // name, players, locked (needs a password)
 constexpr size_t kMaxRoomsPerReply = 24;
 constexpr size_t kListRequestSize = kHeaderSize + 1 + kMaxRoomsPerReply * kRoomEntrySize;   // requests are padded to the largest answer
+
+// Room passwords. Nothing secret ever travels: the password is turned into a 64-bit key together with the room name; every packet of a locked room carries a tag that only
+// somebody with the key can make (`authTag`), and the rendezvous server is given a one-way image of the key (`verifier`) so that it can keep strangers out of the room's
+// list of members without knowing the password. This keeps unwanted players out; it does not encrypt the game traffic.
+inline uint64_t mix64(uint64_t x) {
+    x += 0x9E3779B97F4A7C15ull;
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+    return x ^ (x >> 31);
+}
+inline uint64_t passwordKey(const std::string& room, const std::string& password) {
+    if (password.empty()) return 0;
+    uint64_t h = 1469598103934665603ull;
+    auto feed = [&](unsigned char c) { h = mix64(h ^ c); };
+    for (char c : room) { if (c == ' ') continue; feed(uint8_t(c >= 'a' && c <= 'z' ? c - 32 : c)); }
+    feed(0x1F);
+    for (char c : password) feed(uint8_t(c));
+    return h ? h : 1;
+}
+inline uint64_t passwordVerifier(uint64_t key) { return key ? (mix64(key ^ 0xA5A5C0DEC0FFEE11ull) | 1) : 0; }
+inline uint32_t authTag(uint64_t key, uint32_t room, uint32_t uid) {
+    if (!key) return 0;
+    const uint32_t t = uint32_t(mix64(key ^ (uint64_t(room) << 32 | uid)));
+    return t ? t : 1;
+}
 
 inline uint32_t roomHash(const std::string& room) {
     uint32_t h = 2166136261u;
@@ -135,21 +165,32 @@ inline std::vector<uint8_t> beginPacket(PacketType type, uint32_t room, uint32_t
     std::vector<uint8_t> o;
     detail::put(o, &kMagic, 4);
     o.push_back(type);
+    o.push_back(0);   // region: stamped when the packet is sent
     detail::put(o, &room, 4);
     detail::put(o, &uid, 4);
+    const uint32_t auth = 0;
+    detail::put(o, &auth, 4);   // stamped when the packet is sent
     return o;
 }
+// The release and the room's tag of the sender go into the header of a finished packet.
+inline void stampPacket(std::vector<uint8_t>& o, uint8_t region, uint32_t auth) {
+    if (o.size() < kHeaderSize || std::memcmp(o.data(), &kMagic, 4) != 0) return;
+    o[5] = region;
+    std::memcpy(&o[kHeaderSize - 4], &auth, 4);
+}
 
-struct Header { PacketType type = kState; uint32_t room = 0, uid = 0; };
+struct Header { PacketType type = kState; uint8_t region = 0; uint32_t room = 0, uid = 0, auth = 0; };
 
 inline bool parseHeader(const uint8_t* d, size_t n, Header& h) {
     if (n < kHeaderSize) return false;
     uint32_t magic;
     std::memcpy(&magic, d, 4);
-    if (magic != kMagic || d[4] < kState || d[4] > kRoomInfo) return false;
+    if (magic != kMagic || d[4] < kState || d[4] > kDenied) return false;
     h.type = PacketType(d[4]);
-    std::memcpy(&h.room, d + 5, 4);
-    std::memcpy(&h.uid, d + 9, 4);
+    h.region = d[5];
+    std::memcpy(&h.room, d + 6, 4);
+    std::memcpy(&h.uid, d + 10, 4);
+    std::memcpy(&h.auth, d + 14, 4);
     return h.uid != 0;
 }
 
@@ -166,19 +207,21 @@ inline bool decodeState(const uint8_t* d, size_t n, PlayerState& s) {
 
 inline std::vector<uint8_t> encodeBye(uint32_t room, uint32_t uid) { return beginPacket(kBye, room, uid); }
 
-struct Register { char roomName[kNameLength] = {}; char name[kNameLength] = {}; Endpoint priv; };
-inline std::vector<uint8_t> encodeRegister(uint32_t room, uint32_t uid, const std::string& roomName, const std::string& name, const Endpoint& priv) {
+struct Register { char roomName[kNameLength] = {}; char name[kNameLength] = {}; Endpoint priv; uint64_t verifier = 0; };   // verifier: 0 = an open room
+inline std::vector<uint8_t> encodeRegister(uint32_t room, uint32_t uid, const std::string& roomName, const std::string& name, const Endpoint& priv, uint64_t verifier = 0) {
     auto o = beginPacket(kRegister, room, uid);
     detail::putName(o, roomName.c_str(), roomName.size());
     detail::putName(o, name.c_str(), name.size());
     detail::putEndpoint(o, priv);
+    detail::put(o, &verifier, 8);
     return o;
 }
 inline bool decodeRegister(const uint8_t* d, size_t n, Register& r) {
-    if (n != kHeaderSize + 2 * kNameLength + 6) return false;
+    if (n != kHeaderSize + 2 * kNameLength + 6 + 8) return false;
     detail::getName(d + kHeaderSize, r.roomName);
     detail::getName(d + kHeaderSize + kNameLength, r.name);
     r.priv = detail::getEndpoint(d + kHeaderSize + 2 * kNameLength);
+    std::memcpy(&r.verifier, d + kHeaderSize + 2 * kNameLength + 6, 8);
     return true;
 }
 
@@ -229,7 +272,7 @@ inline std::vector<uint8_t> encodeRelayed(uint32_t room, uint32_t from, const Pl
     return o;
 }
 
-struct RoomEntry { char name[kNameLength] = {}; uint8_t players = 0; };
+struct RoomEntry { char name[kNameLength] = {}; uint8_t players = 0; bool locked = false; };
 
 // Requests are padded to the size of the biggest possible answer, so that a forged sender address cannot make the server or a player
 // send more data to a victim than the victim could have sent itself.
@@ -246,6 +289,7 @@ inline std::vector<uint8_t> encodeRooms(const std::vector<RoomEntry>& rooms) {
     for (size_t i = 0; i < rooms.size() && i < kMaxRoomsPerReply; ++i) {
         detail::putName(o, rooms[i].name, kNameLength - 1);
         o.push_back(rooms[i].players);
+        o.push_back(rooms[i].locked ? 1 : 0);
     }
     return o;
 }
@@ -259,21 +303,25 @@ inline bool decodeRooms(const uint8_t* d, size_t n, std::vector<RoomEntry>& room
         RoomEntry r;
         detail::getName(e, r.name);
         r.players = e[kNameLength];
+        r.locked = e[kNameLength + 1] != 0;
         rooms.push_back(r);
     }
     return true;
 }
-inline std::vector<uint8_t> encodeRoomInfo(uint32_t uid, const std::string& roomName, uint8_t players) {
+inline std::vector<uint8_t> encodeRoomInfo(uint32_t uid, const std::string& roomName, uint8_t players, bool locked = false) {
     auto o = beginPacket(kRoomInfo, 0, uid);
     detail::putName(o, roomName.c_str(), roomName.size());
     o.push_back(players);
+    o.push_back(locked ? 1 : 0);
     return o;
 }
 inline bool decodeRoomInfo(const uint8_t* d, size_t n, RoomEntry& r) {
     if (n != kHeaderSize + kRoomEntrySize) return false;
     detail::getName(d + kHeaderSize, r.name);
     r.players = d[kHeaderSize + kNameLength];
+    r.locked = d[kHeaderSize + kNameLength + 1] != 0;
     return true;
 }
+inline std::vector<uint8_t> encodeDenied(uint32_t room, uint32_t uid) { return beginPacket(kDenied, room, uid); }
 
 }  // namespace cb2net

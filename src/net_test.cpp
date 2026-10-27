@@ -28,10 +28,12 @@ struct Player {
     std::unique_ptr<Session> s = std::make_unique<Session>();
     std::string name;
     int x = 0;
-    bool open(const std::string& n, const std::string& room, const std::string& rendezvous, const std::string& directory = "", bool joinViaDirectory = false, std::vector<std::string> seeds = {}) {
+    uint8_t region = 0;   // the release this player pretends to run (one process, so the process-wide value is switched around each call)
+    bool open(const std::string& n, const std::string& room, const std::string& rendezvous, const std::string& directory = "", bool joinViaDirectory = false, std::vector<std::string> seeds = {}, const std::string& password = "") {
         name = n;
         std::string err;
-        if (!s->start({room, n, rendezvous, directory, seeds, joinViaDirectory}, err)) { std::printf("  cannot start %s: %s\n", n.c_str(), err.c_str()); return false; }
+        cb2net::localRegion() = region;
+        if (!s->start({room, n, rendezvous, directory, seeds, joinViaDirectory, password}, err)) { std::printf("  cannot start %s: %s\n", n.c_str(), err.c_str()); return false; }
         return true;
     }
     void tick() {
@@ -39,6 +41,7 @@ struct Player {
         std::strncpy(st.name, name.c_str(), cb2net::kNameLength - 1);
         st.level = 0x1E;
         st.pos[0] = x;
+        cb2net::localRegion() = region;
         s->setLocal(st);
         s->update(nowSeconds());
     }
@@ -69,10 +72,11 @@ double run(std::vector<Player*> players, double seconds, F done) {
 using cb2net::RoomBrowser;
 
 // Lets a browser run for up to `seconds` (other players keep updating) until it lists `name` with at least `players` players.
-bool browse(RoomBrowser& br, std::vector<Player*> players, const std::string& name, int players_, double seconds, double& took) {
+bool browse(RoomBrowser& br, std::vector<Player*> players, const std::string& name, int players_, double seconds, double& took, uint8_t region = 0) {
     const double t0 = nowSeconds();
     while (nowSeconds() - t0 < seconds) {
         for (Player* p : players) p->tick();
+        cb2net::localRegion() = region;   // the browser belongs to a game of this release
         br.update(nowSeconds());
         for (const auto& r : br.rooms()) if (r.name == name && r.players >= players_) { took = nowSeconds() - t0; return true; }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -121,10 +125,11 @@ int survive(const std::string& server, const std::string& goFile) {
 // Demo helper: keeps a few players in rooms on a server for a while (so that a lobby's room list has something to show).
 //   cb2_nettest --hold host:port seconds
 int hold(const std::string& server, double seconds) {
-    struct Seat { const char* name; const char* room; };
-    const Seat seats[] = {{"MAX", "SNOW GANG"}, {"COCO", "SNOW GANG"}, {"TINY", "TURTLES"}, {"DINGO", "TURTLES"}, {"BRIO", "TURTLES"}, {"AKU", "LONELY"}};
+    struct Seat { const char* name; const char* room; const char* password; };
+    const Seat seats[] = {{"MAX", "SNOW GANG", "sled"}, {"COCO", "SNOW GANG", "sled"}, {"TINY", "TURTLES", ""}, {"DINGO", "TURTLES", ""}, {"BRIO", "TURTLES", ""}, {"AKU", "LONELY", ""}};
+    const uint8_t region = std::getenv("CB2_HOLD_PAL") ? 1 : 0;
     std::vector<std::unique_ptr<Player>> players;
-    for (const Seat& s : seats) { auto p = std::make_unique<Player>(); if (p->open(s.name, s.room, server)) players.push_back(std::move(p)); }
+    for (const Seat& s : seats) { auto p = std::make_unique<Player>(); p->region = region; if (p->open(s.name, s.room, server, "", false, {}, s.password)) players.push_back(std::move(p)); }
     const double t0 = nowSeconds();
     while (nowSeconds() - t0 < seconds) {
         for (auto& p : players) p->tick();
@@ -344,6 +349,45 @@ int main(int argc, char** argv) {
         check(gone, "the room disappears from the list once everybody has left");
     }
 
+    std::printf("1c. room passwords and the two releases (this PC / LAN)\n");
+    {
+        Player a, b, wrong, none;
+        a.open("ANNA", "PWLAN" + tag, "", "", false, {}, "tiger"); b.open("BEN", "PWLAN" + tag, "", "", false, {}, "tiger");
+        wrong.open("WENDY", "PWLAN" + tag, "", "", false, {}, "lion"); none.open("NED", "PWLAN" + tag, "");
+        const double t = run({&a, &b, &wrong, &none}, 6, [&] { return a.sees("BEN") && b.sees("ANNA"); });
+        check(t >= 0, "players who know the password meet", t);
+        run({&a, &b, &wrong, &none}, 2, [] { return false; });
+        check(!wrong.sees("ANNA") && !a.sees("WENDY") && !b.sees("WENDY"), "a wrong password keeps a stranger out both ways");
+        check(!none.sees("ANNA") && !a.sees("NED"), "no password at all keeps a stranger out too");
+        check(wrong.s->denied() && none.s->denied(), "the strangers are told (WRONG PASSWORD)");
+        check(!a.s->denied() && !b.s->denied() && a.s->locked(), "the members are not refused");
+        RoomBrowser br;
+        br.start("");
+        const double t0 = nowSeconds();
+        bool lockedSeen = false;
+        while (nowSeconds() - t0 < 6 && !lockedSeen) {
+            for (Player* p : {&a, &b}) p->tick();
+            br.update(nowSeconds());
+            for (const auto& r : br.rooms()) lockedSeen = lockedSeen || (r.name == "PWLAN" + tag && r.locked);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        check(lockedSeen, "the lobby marks the room as locked");
+        // PAL and NTSC players with the same room name never meet
+        Player u, p1, p2;
+        p1.region = p2.region = 1;
+        u.open("URSULA", "REG" + tag, ""); p1.open("PIA", "REG" + tag, ""); p2.open("PAUL", "REG" + tag, "");
+        const double tp = run({&u, &p1, &p2}, 6, [&] { return p1.sees("PAUL") && p2.sees("PIA"); });
+        check(tp >= 0, "two PAL players meet", tp);
+        run({&u, &p1, &p2}, 1, [] { return false; });
+        check(!u.sees("PIA") && !p1.sees("URSULA"), "a player of the other release is not in the room");
+        RoomBrowser brPal, brUs;
+        brPal.start(""); brUs.start("");
+        double tb = 0, tb2 = 0;
+        check(browse(brPal, {&u, &p1, &p2}, "REG" + tag, 2, 6, tb, 1), "a PAL lobby lists the PAL room with its 2 players", tb);
+        check(!browse(brUs, {&u, &p1, &p2}, "REG" + tag, 2, 3, tb2, 0), "an NTSC lobby does not list it (only the 1 NTSC player's room, if at all)");
+        cb2net::localRegion() = 0;
+    }
+
     if (server.empty()) { std::printf("(no rendezvous address given: server scenarios skipped)\n"); return failures ? 1 : 0; }
 
     std::printf("2. through the rendezvous server (no LAN probing): players are introduced and connect directly\n");
@@ -414,6 +458,45 @@ int main(int argc, char** argv) {
         a2.open("ANNA", "TRI" + tag, server);
         const double back = run({&a2, &b, &c}, 10, [&] { return a2.sees("BEN") && a2.sees("CARL") && b.sees("ANNA") && c.sees("ANNA"); });
         check(back >= 0, "ANNA rejoins through the server and everybody sees everybody", back);
+        setEnv("CB2_NOLAN", nullptr);
+    }
+
+    std::printf("5. room passwords through the server (also over the relay)\n");
+    {
+        setEnv("CB2_NOLAN", "1");
+        Player a, b, wrong, none;
+        a.open("ANNA", "SPW" + tag, server, "", false, {}, "tiger"); b.open("BEN", "SPW" + tag, server, "", false, {}, "tiger");
+        const double t = run({&a, &b}, 10, [&] { return a.sees("BEN") && b.sees("ANNA"); });
+        check(t >= 0, "members meet through the server", t);
+        wrong.open("WENDY", "SPW" + tag, server, "", false, {}, "lion"); none.open("NED", "SPW" + tag, server);
+        run({&a, &b, &wrong, &none}, 3, [] { return false; });
+        check(!wrong.sees("ANNA") && !none.sees("ANNA") && !a.sees("WENDY") && !a.sees("NED"), "strangers are not introduced to the members");
+        check(wrong.s->denied() && none.s->denied(), std::string("the server refuses them (WRONG PASSWORD) wrong=") + (wrong.s->denied() ? "y" : "n") + " none=" + (none.s->denied() ? "y" : "n"));
+        RoomBrowser br;
+        br.start(server);
+        const double t0 = nowSeconds();
+        bool lockedSeen = false;
+        while (nowSeconds() - t0 < 8 && !lockedSeen) {
+            for (Player* p : {&a, &b}) p->tick();
+            br.update(nowSeconds());
+            for (const auto& r : br.rooms()) lockedSeen = lockedSeen || (r.name == "SPW" + tag && r.locked && r.fromServer);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        check(lockedSeen, "the server's list marks the room as locked");
+        // the relay carries the tag, so locked rooms work for players behind symmetric NATs, and the server's copy cannot be forged by a stranger
+        setEnv("CB2_NODIRECT", "1");
+        Player c, d;
+        c.open("CLARA", "SPWR" + tag, server, "", false, {}, "tiger"); d.open("DAN", "SPWR" + tag, server, "", false, {}, "tiger");
+        const double tr = run({&c, &d}, 15, [&] { return c.sees("DAN") && d.sees("CLARA"); });
+        check(tr >= 0 && c.route() == "relay", "members meet over the relay (" + c.route() + ")", tr);
+        setEnv("CB2_NODIRECT", nullptr);
+        // the other release's players do not meet, nor see the room
+        Player pal;
+        pal.region = 1;
+        pal.open("PIA", "SPW" + tag, server, "", false, {}, "tiger");
+        run({&a, &b, &pal}, 3, [] { return false; });
+        check(!pal.sees("ANNA") && !a.sees("PIA"), "the same room and password under the other release is a different room");
+        cb2net::localRegion() = 0;
         setEnv("CB2_NOLAN", nullptr);
     }
 

@@ -21,7 +21,7 @@ Platform::Platform() {
     cpu.ram = ram.data();
     cpu.cop0[12] = 0x00000400u;  // IM2 set; IEc stays clear until the game leaves its critical section
     cd.disc = &disc;
-    nextVblank = kFrameCycles;
+    nextVblank = frameCycles;
     cpu.ioRead = [this](r3000::Cpu&, uint32_t a, int s) { return ioRead(a, s); };
     cpu.ioWrite = [this](r3000::Cpu&, uint32_t a, uint32_t v, int s) { ioWrite(a, v, s); };
     cpu.bios = [this](r3000::Cpu&, uint32_t vec) { return bios(vec); };
@@ -58,13 +58,20 @@ bool Platform::loadExeImage(const std::vector<uint8_t>& b) {
     if (b.size() < 0x800 || std::memcmp(b.data(), "PS-X EXE", 8) != 0) return false;
     auto w = [&](size_t o) { uint32_t v; std::memcpy(&v, &b[o], 4); return v; };
     uint32_t pc = w(0x10), gp = w(0x14), dest = w(0x18), size = w(0x1C), sp = w(0x30) ? w(0x30) + w(0x34) : 0x801FFFF0u;
+    // which release this is: its addresses and its video rate
+    if (const cb2game::Profile* known = cb2game::forEntry(pc)) profile = known;
+    cb2game::currentSlot() = profile;
+    overrides.clear();
+    for (const uint32_t stub : profile->cardStub) overrides[stub] = 0;
+    frameCycles = profile->frameCycles;
+    nextVblank = frameCycles;
     if (initialSp) sp = initialSp;
     const size_t n = std::min<size_t>(size, b.size() - 0x800);
     std::memcpy(ram.data() + (dest & ramMask()), b.data() + 0x800, n);
     if (ramMask() + 1 > r3000::kRamSize) {
         // The Psy-Q start-up code derives the stack and the heap end from this "RAM size" word of the data segment,
         // so changing it hands the extra memory to the engine's heap (verified: heap end moves to the new top).
-        const uint32_t sizeWord = 0x8005F188u & ramMask();
+        const uint32_t sizeWord = profile->exeSizeWord & ramMask();
         const uint32_t v = ramMask() + 1;
         std::memcpy(ram.data() + sizeWord, &v, 4);
     }
@@ -140,7 +147,7 @@ void Platform::service() {
     if (cd.irqLine && !cdPrevIrq) raiseIrq(4);
     cdPrevIrq = cd.irqLine;
     if (cycles >= nextVblank) {
-        nextVblank += kFrameCycles;
+        nextVblank += frameCycles;
         raiseIrq(1);
         gpu.vblank();
         ++frames;
@@ -257,12 +264,17 @@ void Platform::returnFromException() {
 }
 
 namespace {
-// PsyQ VSync(): the loop that waits for the vertical-blank counter (0x8005DC98) to reach the target in $a0, with its time-out counter at 0x10($sp).
-constexpr uint32_t kVsyncSpin = 0x8004A5F4, kVsyncCounter = 0x8005DC98;
-constexpr uint32_t kVsyncCode[][2] = {{0x8004A5F4, 0x8FA20010}, {0x8004A5F8, 0}, {0x8004A5FC, 0x2442FFFF}, {0x8004A600, 0xAFA20010}, {0x8004A604, 0x8FA20010}, {0x8004A608, 0},
-                                       {0x8004A60C, 0x1443000C}, {0x8004A610, 0}, {0x8004A640, 0x3C028006}, {0x8004A644, 0x8C42DC98}, {0x8004A648, 0}, {0x8004A64C, 0x0044102A},
-                                       {0x8004A650, 0x1440FFE8}, {0x8004A654, 0}};
+// PsyQ VSync(): the loop that waits for the vertical-blank counter to reach the target in $a0, with its time-out counter at 0x10($sp). The code of the loop is the same in every
+// release; only the addresses move. `vsyncCode` is what the loop must look like for skipVsyncSpin to touch it.
 constexpr uint64_t kVsyncLoopInstructions = 14;   // one pass: 8 instructions up to the branch and its delay slot, 6 more to the loop-back branch and its delay slot
+
+std::vector<std::pair<uint32_t, uint32_t>> vsyncCode(const cb2game::Profile& g) {
+    const uint32_t s = g.vsyncSpin, c = g.vsyncCounter;
+    const uint32_t hi = ((c + 0x8000u) >> 16) & 0xFFFFu, lo = c & 0xFFFFu;
+    return {{s, 0x8FA20010}, {s + 4, 0}, {s + 8, 0x2442FFFF}, {s + 12, 0xAFA20010}, {s + 16, 0x8FA20010}, {s + 20, 0},
+            {s + 24, 0x1443000C}, {s + 28, 0}, {s + 0x4C, 0x3C020000u | hi}, {s + 0x50, 0x8C420000u | lo}, {s + 0x54, 0}, {s + 0x58, 0x0044102A},
+            {s + 0x5C, 0x1440FFE8}, {s + 0x60, 0}};
+}
 }  // namespace
 
 // Cycles from now until something other than the CPU can change the machine: the vertical blank, the CD controller, a timer interrupt, the SPU interrupt.
@@ -298,11 +310,11 @@ uint64_t Platform::skipVsyncSpin(uint64_t room) {
     uint64_t passes = (horizon - kMargin) / (kVsyncLoopInstructions * 2);
     const uint32_t timeoutAt = cpu.r[29] + 0x10;
     const int32_t timeout = int32_t(cpu.rd32(timeoutAt));
-    if (timeout <= 2 || int32_t(cpu.rd32(kVsyncCounter)) >= int32_t(cpu.r[4])) return 0;
+    if (timeout <= 2 || int32_t(cpu.rd32(profile->vsyncCounter)) >= int32_t(cpu.r[4])) return 0;
     passes = std::min<uint64_t>(passes, uint64_t(timeout - 2));   // never skip the time-out itself
     passes = std::min(passes, room / kVsyncLoopInstructions);   // run() hands control back after a fixed number of instructions: skipped ones count, so it stays where it always did
     if (passes == 0) return 0;
-    for (const auto& w : kVsyncCode) if (cpu.rd32(w[0]) != w[1]) return 0;
+    for (const auto& w : vsyncCode(*profile)) if (cpu.rd32(w.first) != w.second) return 0;
     cpu.wr32(timeoutAt, uint32_t(timeout - int32_t(passes)));
     cpu.r[2] = 1;   // the result of the loop's last comparison
     cpu.instructions += passes * kVsyncLoopInstructions;
@@ -343,7 +355,7 @@ std::string Platform::run(uint64_t count) {
                     }
                 }
             }
-            if (idleSkip && cpu.pc == kVsyncSpin && cpu.nextPc == kVsyncSpin + 4 && !(istat & imask) && !inHook) i += skipVsyncSpin(count - i - 1);
+            if (idleSkip && cpu.pc == profile->vsyncSpin && cpu.nextPc == profile->vsyncSpin + 4 && !(istat & imask) && !inHook) i += skipVsyncSpin(count - i - 1);
             cpu.step();
             syncTime();
             if (pcHist && (cpu.instructions & 255) == 0) ++(*pcHist)[cpu.pc];
@@ -957,7 +969,7 @@ bool Platform::enableNative() {
 namespace {
 // Library routine 8004a5cc(target, timeout): spins until the vblank counter at 8005dc98 reaches `target`.
 void hleVsyncWait(Platform& P) {
-    while (int32_t(P.cpu.rd32(0x8005DC98u)) < int32_t(P.cpu.r[4])) P.idleToNextEvent();
+    while (int32_t(P.cpu.rd32(P.profile->vsyncCounter)) < int32_t(P.cpu.r[4])) P.idleToNextEvent();
     P.cpu.r[2] = 0;
 }
 }  // namespace
@@ -971,13 +983,14 @@ void Platform::idleToNextEvent() {
 }
 
 bool Platform::loadNativeTable(bool hle) {
+    if (profile->region != cb2game::Region::Ntsc) return false;   // the translated engine code is the NTSC-U one
     if (recomp::kFunctionCount == 0) return false;
     nativeFns.assign(size_t(0x4F800 >> 2), nullptr);
     for (const recomp::Entry* e = recomp::kFunctions; e->fn; ++e) {
         const uint32_t i = (e->addr - 0x80010000u) >> 2;
         if (i < nativeFns.size()) nativeFns[i] = e->fn;
     }
-    if (hle) nativeFns[(0x8004A5CCu - 0x80010000u) >> 2] = &hleVsyncWait;
+    if (hle) nativeFns[(profile->vsyncWait - 0x80010000u) >> 2] = &hleVsyncWait;
     return true;
 }
 

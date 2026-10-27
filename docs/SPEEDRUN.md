@@ -6,7 +6,7 @@ players in the room, and is built so that a leaderboard can be added later witho
 ## What is timed
 
 - The clock starts the first frame **Crash can move** after a level has loaded (not while the level loads), and is shown in the top right
-  corner (`F4` hides it, or *Sound and picture → Level timer*). It counts the game's own time at 59.94 frames per second, so the menu pausing
+  corner (`F4` hides it, or *Settings → Sound and timer → Level timer*). It counts the game's own time (59.94 frames per second on the American release, 50 on the European one), so the menu pausing
   the game stops it, and a slow PC does not change the result.
 - A run ends when the game asks for a different level:
   - it asks for **the place you came from** (the warp room): the level is **finished**, the time is recorded;
@@ -34,7 +34,7 @@ survives updates; copy it to keep your times. A damaged line is skipped without 
 
 ## What the others see
 
-Each player's state packet (protocol version 2, `src/netproto.hpp`) carries their **personal best for the level they are in**, and their
+Each player's state packet (protocol version 3, `src/netproto.hpp`) carries their **personal best for the level they are in**, and their
 **latest run** (level, time, finished or not) with a counter that goes up with every run. In a room:
 
 - the **player list** (right edge, `F3`) shows for each player the level, the time since they entered it, `PB m:ss.t` (their best there) and
