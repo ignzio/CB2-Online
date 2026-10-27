@@ -1,34 +1,41 @@
 # The website and the public home of the project
 
-The source repository can be **private**. What the world needs to see lives in a **public** repository (here: `ignzio/CB2-Online`, change it in `site/config.js`):
+The page is served by **GitHub Pages** straight from this repository: **Settings > Pages > Source: Deploy from a branch > `main` / `/docs`**. GitHub Pages only offers the repository root (`/`) or `/docs`, so
+the site lives in `docs/` next to the documentation:
+
+| File | What |
+|---|---|
+| `docs/index.html` | the text of the page |
+| `docs/style.css` | the look |
+| `docs/app.js` | reads the latest release from the GitHub API and draws the milestone bars and donation buttons |
+| `docs/config.js` | the repository, donation links, amount raised and the milestones |
+| `docs/img/` | screenshots (shared with the README) |
+| `docs/.nojekyll` | tells Pages not to run Jekyll, so the Markdown documents next to the page are served as they are |
+
+Deploying is pushing to `main`: Pages rebuilds `docs/` within a minute or two. Nothing else to run.
+
+Where everything lives:
 
 | What | Where |
 |---|---|
-| Downloads (the zip, `Crash2.exe`, `Crash2-Server.exe`) | GitHub **Releases** of the public repository |
-| The page people read | `site/` -> GitHub **Pages** of the public repository |
-| Bug reports | **Issues** of the public repository (Esc > Report a bug opens a prefilled one) |
-| The in-game updater | reads the latest release of the public repository (no login is needed for a public repository) |
+| Downloads (the zip, `Crash2.exe`, `Crash2-Server.exe`) | GitHub **Releases** of `ignzio/CB2-Online` |
+| The page people read | `docs/` -> GitHub **Pages** (`https://ignzio.github.io/CB2-Online/`, or the account's custom domain if one is set) |
+| Bug reports | **Issues** (Esc > Report a bug opens a prefilled one) |
+| The in-game updater | reads the latest release (no login is needed while the repository is public) |
 
-Why it matters: a release of a private repository cannot be downloaded without a login, and neither can the updater read it. If the repository where the releases are published is made
-private, downloads and updates stop working for everybody else.
-
-## One-time setup
-
-1. Decide which repository is public. Easiest: keep `ignzio/CB2-Online` public and move the *source code* to a new private repository (for example `ignzio/CB2-Online-src`) - or the other way round,
-   create a new public repository (for example `ignzio/CB2-Online-releases`) that has no source, only the website and the releases.
-2. In the public repository: Settings > Pages > Source: **GitHub Actions**. Enable **Issues**.
-3. Put the public repository's name in two places:
-   - `site/config.js` (`repo`),
-   - the game: `cmake -S . -B build -DCB2_RELEASE_REPO=owner/name` (the updater and the bug report button use it), and `tools\make_release.ps1 -Repo owner/name` when publishing.
-4. `powershell -File tools\publish_site.ps1 -Repo owner/name` copies `site/` to the public repository and pushes it; the workflow in `site/pages.yml` publishes it.
-5. In `site/config.js` fill in your donation links (an empty `url` hides the button) and keep `raised` up to date by hand; the milestone bars follow it.
+**The repository has to stay public** for all of this: a release of a private repository cannot be downloaded without a login, the updater cannot read it, and GitHub Pages for a private repository needs a
+paid plan (and then serves the page publicly anyway, but the downloads would still need a login). If the source code must be private, keep a separate public repository for releases and the website
+(`site/config.js` -> `repo`, `cmake -DCB2_RELEASE_REPO=owner/name`, `tools\make_release.ps1 -Repo owner/name`) and copy `docs/index.html`, `style.css`, `app.js`, `config.js`, `.nojekyll` and `img/` there.
 
 ## Editing the page
 
-`site/index.html` (text), `site/style.css`, `site/config.js` (repository, donation links, milestones, amounts). Screenshots are in `site/img/`; replace them or add footage (a `<video>` in the hero
-works well). Open `site/index.html` in a browser to preview it; the download section reads the latest release live from the GitHub API.
+`docs/index.html` (text, including the "Where this is going" section), `docs/style.css`, `docs/config.js` (repository, donation links, amounts and the milestones). Screenshots are in `docs/img/`; replace them or add
+footage (a `<video>` in the hero works well). Open `docs/index.html` in a browser to preview it (or `python -m http.server` in `docs/`); the download section reads the latest release live from the GitHub API.
+
+Milestones (`config.js`): `status` is `done`, `active` or `planned`; `goal` is the cumulative amount that has to be raised for it; the bars follow `raised`, which you update by hand.
+The current list: online multiplayer (done), native world renderer (in progress), speedrun multiplayer, dedicated servers, native water/ice, co-op mode, skins, level editor, custom levels, freeroam.
 
 ## Donations
 
-The page only links to services you set up (Ko-fi, GitHub Sponsors, PayPal ...). It says that donations support the development of the open-source tools and unlock nothing. Keep it that way:
+The page only links to services you set up (Ko-fi, GitHub Sponsors, PayPal ...; an empty `url` hides the button). It says that donations support the development of the open-source tools and unlock nothing. Keep it that way:
 the game belongs to its rights holders, so do not sell access, perks inside the game or anything that contains game data, and do not use the game's name for products.

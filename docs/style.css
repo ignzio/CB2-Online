@@ -43,7 +43,7 @@ h3 { font-size: 1.15rem; }
 .alt { background: var(--bg2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .lead.center { max-width: 46em; color: #c7d3ee; }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(290px, 100%), 1fr)); gap: 18px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
 .card h3 { color: var(--orange2); }
 .card p { margin: 0; color: #c7d3ee; }

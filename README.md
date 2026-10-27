@@ -212,6 +212,12 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
 
+## Roadmap
+
+The goal is a complete multiplayer Crash Bandicoot 2: a **fully speedrun multiplayer experience** (synchronised race starts, live splits and standings, ghosts, public leaderboards), **co-op mode** (shared crates,
+enemies and checkpoints), a **level editor** and **custom levels** you can share with the room, **skins**, and a **freeroam** mode. The project page ([docs/](docs/index.html), served by GitHub Pages) lists them as
+milestones; see [docs/WEBSITE.md](docs/WEBSITE.md).
+
 ## Known limits
 
 - Other players are shown, not solid: no collision and no shared crates or enemies.
