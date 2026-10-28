@@ -531,6 +531,7 @@ int main(int argc, char** argv) {
     settings.perspective = cfg.perspective || std::getenv("CB2_PERSPECTIVE") != nullptr;
     settings.nativeWorld = cfg.nativeWorld || std::getenv("CB2_NATIVEWORLD") != nullptr;
     settings.props = cfg.props || std::getenv("CB2_PROPS") != nullptr;
+    settings.skipIntro = cfg.skipIntro && !std::getenv("CB2_NOSKIP");
     settings.vsync = cfg.vsync;
     psx::FrameInterpolator interp;
     if (const char* g = std::getenv("CB2_GROW")) interp.grow = float(std::atof(g));   // tests
@@ -617,6 +618,7 @@ int main(int argc, char** argv) {
         cfg.remember(exeDir, "perspective", settings.perspective ? "on" : "off");
         cfg.remember(exeDir, "native_world", settings.nativeWorld ? "on" : "off");
         cfg.remember(exeDir, "props", settings.props ? "on" : "off");
+        cfg.remember(exeDir, "skip_intro", settings.skipIntro ? "on" : "off");
         cfg.remember(exeDir, "textures", settings.textures ? "smooth" : "sharp");
         cfg.remember(exeDir, "smooth", settings.smooth ? "on" : "off");
         cfg.remember(exeDir, "vsync", settings.vsync ? "on" : "off");
@@ -626,12 +628,16 @@ int main(int argc, char** argv) {
         }
     };
 
+    // Skipping the intro (see docs/SKIP_INTRO.md): phase 1 = the game is being run, unthrottled and with scripted Start presses, from the boot to the warp room of a new game; 2 = done.
+    int skipPhase = 0;
+    bool skipPressing = true;
     auto padNow = [&]() {
         // Scripted runs (a capture, a hidden window, CB2_NOINPUT) ignore the real keyboard and game pad: their result must not depend on what anybody is doing on the machine meanwhile.
         uint16_t pad = (captureFrame || hidden || std::getenv("CB2_NOINPUT")) ? uint16_t(0xFFFF) : readPad(win, settings.keys);
         // after the menu closes, keys still held from it (Enter!) must not reach the game until they have been released
         if (suppressPad) { if (pad == 0xFFFF) suppressPad = false; else return uint16_t(0xFFFF); }
         if (autoStart && p.frames >= 2310 && p.frames <= 2314) pad &= uint16_t(~(1u << 3));
+        if (skipPhase == 1 && skipPressing && p.frames >= 2300 && (p.frames - 2300) % 100 < 4) pad &= uint16_t(~(1u << 3));   // Start, now and then: the title, the menu and the cutscenes all take it
         for (const PadPress& pp : pressList) if (p.frames >= pp.from && p.frames <= pp.to) pad &= uint16_t(~pp.mask);
         return pad;
     };
@@ -755,6 +761,39 @@ int main(int argc, char** argv) {
             for (FakeRequest& fr : fakeRequests) fr.frame += p.frames;
         }
     }
+    // Skip the intro. A new game starts in the warp room: the first time, the game is run unthrottled from the boot to the warp room (on a blank memory card, so that nothing of the player's
+    // own saves is read or written), and the console is saved there (states\warproom.cb2state); every later start loads that state, which takes a moment.
+    // Not when anything else decides where the game starts (a state, a script), nor when the card already has a save: that player has the title screen's Continue.
+    std::vector<uint8_t> realCard;
+    std::string realCardPath;
+    bool realCardNew = true;
+    const std::string warpState = (std::filesystem::path(exeDir) / "states" / (release.region == cb2game::Region::Pal ? "pal-warproom.cb2state" : "warproom.cb2state")).string();
+    auto restoreCard = [&] { p.card.image() = realCard; p.card.path = realCardPath; p.card.newCard = realCardNew; };
+    {
+        bool cardHasSave = false;
+        for (int b = 1; b <= 15; ++b) if (p.card.image()[size_t(b) * psx::MemCard::kFrame] == 0x51) cardHasSave = true;
+        const bool scripted = !loadStatePath.empty() || autoStart || !pressList.empty() || saveStateFrame || nativeCode || p.frames > 100;
+        if (settings.skipIntro && !scripted && !cardHasSave && (interactiveSession || std::getenv("CB2_FORCESKIP"))) {
+            bool loaded = false;
+            std::error_code ec;
+            if (std::filesystem::exists(warpState, ec)) {
+                const auto r = doLoad(warpState);
+                loaded = r.first;
+                if (!loaded) { std::filesystem::remove(warpState, ec); cb2crash::log("skip intro: the saved warp room could not be loaded (%s); it will be made again", r.second.c_str()); }
+            }
+            if (loaded) {
+                std::printf("skip intro: started from %s\n", warpState.c_str());
+                cb2crash::log("skip intro: started from the saved warp room");
+            } else {
+                realCard = p.card.image(); realCardPath = p.card.path; realCardNew = p.card.newCard;
+                p.card.path.clear();
+                p.card.format();
+                skipPhase = 1;
+                glfwSetWindowTitle(win, "Crash 2 - getting to the warp room (first start only)");
+                cb2crash::log("skip intro: running to the warp room");
+            }
+        }
+    }
     if (interactiveSession) cb2crash::watchMainThread();
     while (!glfwWindowShouldClose(win) && !quitRequested) {
         {   // what a crash report should say about the game's state
@@ -873,7 +912,7 @@ int main(int argc, char** argv) {
         } else {
         // Emulation is paced against the wall clock at the console's own rate (59.94 Hz NTSC, 50 Hz PAL) so the monitor refresh does not matter.
         // Holding Tab runs unthrottled (fast-forward).
-        fast = glfwGetKey(win, GLFW_KEY_TAB) == GLFW_PRESS || (captureFrame != 0 && (!paceFrom || p.frames < paceFrom));
+        fast = skipPhase == 1 || glfwGetKey(win, GLFW_KEY_TAB) == GLFW_PRESS || (captureFrame != 0 && (!paceFrom || p.frames < paceFrom));
         const double due = fast ? 4.0 : (glfwGetTime() - t0) * emuRate - double(p.frames - base);
         continuous = settings.smooth && useHires && showHires && pairValid && !fast && !captureMid && (hz >= 90.0 || forceContinuous);
         if (due < 1.0 && !continuous) {
@@ -909,6 +948,32 @@ int main(int argc, char** argv) {
             }
         }
         msRun += since(runBegan);
+        if (skipPhase == 1) {
+            static uint64_t warpSince = 0;
+            const uint32_t lvl = cb2game::canonicalLevel(cb2game::current().region, p.peek32(cb2game::current().currentLevel));
+            const uint32_t g = p.peek32(cb2game::current().playerGlobal);
+            const bool crashThere = g && p.peek32(g + 0x40) == g && p.peek32(g + 4) == 3;
+            if (lvl == 2) skipPressing = false;   // a Start in the warp room would pause the game
+            if (lvl == 2 && crashThere) { if (!warpSince) warpSince = p.frames; } else warpSince = 0;
+            const bool done = warpSince && p.frames - warpSince >= 90;
+            if (done || p.frames > 40000) {
+                restoreCard();
+                skipPhase = 2;
+                if (done) {
+                    std::error_code ec;
+                    std::filesystem::create_directories(std::filesystem::path(warpState).parent_path(), ec);
+                    const auto r = doSave(warpState);
+                    std::printf("skip intro: warp room reached at frame %llu, %s\n", (unsigned long long)p.frames, r.first ? "saved" : "NOT saved");
+                    cb2crash::log("skip intro: warp room reached at frame %llu (%s)", (unsigned long long)p.frames, r.first ? "saved" : "not saved");
+                } else {
+                    std::printf("skip intro: gave up after %llu frames (level %02X)\n", (unsigned long long)p.frames, lvl);
+                    cb2crash::log("skip intro: gave up at frame %llu in level %02X", (unsigned long long)p.frames, lvl);
+                }
+                glfwSetWindowTitle(win, "Crash Bandicoot 2 (native port)");
+                t0 = glfwGetTime(); base = p.frames; suppressPad = true; interp.reset();
+                wd.snaps.clear(); wd.fails = 0; wd.firstFail = wd.lastFail = 0; wd.lastSnap = p.frames; wd.told = false;
+            }
+        }
         if (p.cpu.gteSamples2 == &nwSamples) {
             const uint32_t lvl = p.peek32(cb2game::current().currentLevel) & 0xFFu;
             if (lvl != nwTried) {
@@ -1373,7 +1438,7 @@ int main(int argc, char** argv) {
                 prevMean = prevMean < 0 ? mean : prevMean * 0.9 + mean * 0.1;
             }
         }
-        const int wantVsync = settings.vsync && !captureFrame && !hidden ? 1 : 0;
+        const int wantVsync = settings.vsync && !captureFrame && !hidden && skipPhase != 1 ? 1 : 0;
         if (wantVsync != appliedVsync) { glfwSwapInterval(wantVsync); appliedVsync = wantVsync; }
         if (!recordDir.empty() && recordCount && p.frames >= recordStart && p.frames >= recordNext) {
             std::filesystem::create_directories(recordDir);

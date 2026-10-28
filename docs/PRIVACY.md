@@ -34,7 +34,3 @@ There is no personal profile to access or delete: the lobby service forgets your
 ## Changes
 
 Changes to this policy appear here, in the repository history.
-
-## Code signing
-
-Windows releases of CB2-Online are, once the application is approved, signed with a certificate from the SignPath Foundation, using SignPath.io's service (see [CODE_SIGNING.md](CODE_SIGNING.md)). Signing happens in the build pipeline; no data about players is involved.

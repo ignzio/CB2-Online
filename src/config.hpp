@@ -20,6 +20,7 @@
 //   refresh_rate = 0                   your monitor's refresh rate for 60 fps smoothing (0 = ask the monitor). From about 90 Hz up, every refresh shows a picture
 //                                      interpolated for that exact moment (160 Hz monitors: 160 distinct pictures a second, no judder); the cost is one more frame of delay
 //   perspective = off                  perspective-correct texturing: textures stop swimming on floors and walls (uses the GTE depth, like DuckStation's PGXP)
+//   skip_intro = on                    a new game starts in the warp room (the intro and the title are skipped); only while the memory card holds no save
 //   props = off                        things that are not in the game but live in it: a bouncy crate in the warp room; experimental
 //   native_world = off                 draw the level scenery with OpenGL from the level files (true widescreen, camera-exact in-between pictures) instead of the game's own polygons; experimental
 //   widescreen = off                   show the picture at the window's aspect ratio (16:9 ...) instead of 4:3: 3D is squeezed and stretched back, the HUD keeps its shape
@@ -68,6 +69,7 @@ struct Config {
     int refreshRate = 0;       // 0 = the monitor's own
     bool perspective = false;  // perspective-correct texturing
     bool nativeWorld = false;  // native world renderer
+    bool skipIntro = true;     // start in the warp room instead of playing the intro (not when the card has a save)
     bool props = false;        // props: a bouncy crate in the warp room (experimental)
     bool widescreen = false;   // wide picture
     bool vsync = true;         // swap with the monitor's refresh

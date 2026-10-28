@@ -32,7 +32,7 @@ what is needed is a certificate **issued to you after an identity check** (nobod
 | Option | Cost | Notes |
 | --- | --- | --- |
 | **Azure Artifact Signing** (formerly Trusted Signing) | about 10 USD a month plus an Azure subscription | no key to keep: Microsoft holds it; individuals only in the USA and Canada, organisations in more countries; identity validation takes days |
-| **SignPath Foundation** | free | for public open-source projects only (the repository would have to be public, with an OSI licence; apply at signpath.org/foundation) |
+| **SignPath Foundation** | free | for public open-source projects with established public visibility (stars, external articles, discussions). Applied in October 2026 and declined for lack of visibility; reapply once the project is better known. Regular SignPath subscriptions are paid |
 | A certificate authority (Sectigo, DigiCert, SSL.com ...) | about 100-400 USD a year | OV or EV; since 2023 the key must be on a hardware token or in a cloud HSM |
 
 Once you have one, set **one** of these in the environment before running `tools\make_release.ps1` (nothing secret goes into the repository):

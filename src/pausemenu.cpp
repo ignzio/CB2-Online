@@ -67,7 +67,7 @@ std::vector<PauseMenu::Item> PauseMenu::items() const {
         v.push_back(kQuit);
         return v;
     }
-    case Page::Settings: return {kGraphics, kSound, kExperimental, kBack};
+    case Page::Settings: return {kGraphics, kSound, kSkipIntro, kExperimental, kBack};
     case Page::Sound: return {kVolume, kTimer, kBack};
     case Page::Graphics: return {kFullscreen, kFilter, kTextures, kPerspective, kVsync, kBack};
     case Page::Experimental: return {kNative, kWide, kSmooth, kProps, kBack};
@@ -98,6 +98,7 @@ void PauseMenu::adjust(Item item, int d) {
     case kNative: s->nativeWorld = !s->nativeWorld; changed = true; break;
     case kWide: s->widescreen = !s->widescreen; changed = true; break;
     case kProps: s->props = !s->props; changed = true; break;
+    case kSkipIntro: s->skipIntro = !s->skipIntro; changed = true; break;
     case kSmooth: s->smooth = !s->smooth; changed = true; break;
     case kVsync: s->vsync = !s->vsync; changed = true; break;
     default: break;
@@ -127,7 +128,7 @@ void PauseMenu::activate(Item item) {
     case kMainMenu: mainSel = sel; page = Page::ConfirmMenu; confirmSel = 1; break;
     case kQuit: mainSel = sel; page = Page::ConfirmQuit; confirmSel = 1; break;
     case kBack: setPage(parentOf(page)); break;
-    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: case kTextures: case kPerspective: case kNative: case kWide: case kProps: adjust(item, 1); break;
+    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: case kTextures: case kPerspective: case kNative: case kWide: case kProps: case kSkipIntro: adjust(item, 1); break;
     default: break;
     }
 }
@@ -384,6 +385,7 @@ void PauseMenu::draw(double t) {
                 valueRow(idx, y, on, "60 FPS SMOOTHING", s->smooth ? "ON" : "OFF", kTeal);
                 badge(146 + canvas.width("60 FPS SMOOTHING", 22) + 12, y + 10);
                 break;
+            case kSkipIntro: valueRow(idx, y, on, "SKIP THE INTRO", s->skipIntro ? "ON" : "OFF", kTeal); break;
             case kProps:
                 valueRow(idx, y, on, "PROPS", s->props ? "ON" : "OFF", kTeal);
                 badge(146 + canvas.width("PROPS", 22) + 12, y + 10);
@@ -417,6 +419,7 @@ void PauseMenu::draw(double t) {
             case kPerspective: return {"STRAIGHT TEXTURES ON SLANTED SURFACES", "THE CONSOLE'S WOBBLE IS GONE", false};
             case kSmooth: return {"UNSTABLE: IN-BETWEEN PICTURES FOR SMOOTHER MOTION", "BEST ON A HIGH REFRESH RATE MONITOR. CAN SHOW GLITCHES", true};
             case kVsync: return {"WAIT FOR THE MONITOR: NO TEARING", "OFF: FASTER REPLIES, THE PICTURE MAY TEAR", false};
+            case kSkipIntro: return {"A NEW GAME STARTS IN THE WARP ROOM", "FROM THE NEXT START. NOT WITH A SAVED GAME ON THE CARD", false};
             case kProps: return {"UNSTABLE: A BOUNCY CRATE IN THE WARP ROOM", "NOT PART OF THE ROOM. JUMP ON IT TO BOUNCE", true};
             case kNative: return {"UNSTABLE: DRAWS THE LEVEL FROM ITS FILES", "IT CAN FLICKER OR MISS PARTS. OFF IS THE SAFE CHOICE", true};
             case kTags: return {"THE NAMES OVER THE OTHER PLAYERS", "", false};
