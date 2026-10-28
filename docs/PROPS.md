@@ -1,6 +1,6 @@
 # Props: things that are not in the game but live in it (experimental)
 
-**Pause menu > Settings > Experimental > Props.** The first prop is the game's own **"?" crate** in the warp room. Its model, its size and its textures are the game's: they are read at the start from the Turtle Woods level file on your own disc (the crate is in that file, `Bp10.G` / `Bp10.V`, 12 polygons, 398 units on a side), so nothing was invented or drawn by hand, and nothing of the game is stored by this program. The crate is not in the warp room's data: the game does not know it exists there. You can walk up to it (it is a wall at the sides) and jump on it (it is a spring on top), and
+**Pause menu > Settings > Experimental > Props.** Two things: the game's own **"?" crate** in the warp room (a host prop, below) and a **wall of real crates in Turtle Woods** (real game objects, see "A wall of real crates"). Its model, its size and its textures are the game's: they are read at the start from the Turtle Woods level file on your own disc (the crate is in that file, `Bp10.G` / `Bp10.V`, 12 polygons, 398 units on a side), so nothing was invented or drawn by hand, and nothing of the game is stored by this program. The crate is not in the warp room's data: the game does not know it exists there. You can walk up to it (it is a wall at the sides) and jump on it (it is a spring on top), and
 Crash goes up like on a bounce crate. Switch it off and nothing of it is left. It works on both releases (NTSC-U and PAL) and with native world, widescreen and 60 fps smoothing on or off.
 
 ## How it works
@@ -50,6 +50,21 @@ The crates in the Turtle Woods file (the name is the animation's; all are 12-pol
 | `BF10` | wooden slats (20 polygons) | `BG10` | glass (see-through; the polygons are drawn solid) |
 
 They are drawn but not yet what they are in the game: every one of them is just a box that bounces (a TNT crate does not explode, a Nitro does not hurt).
+## A wall of real crates in Turtle Woods
+
+In **Turtle Woods** (with Props on) a wall of 4 x 8 crates stands beside the single "?" crate at the start of the first path. These are **real game objects**: each one is made with the engine's own object-creation routine (`0x80019800`) as an object of the game's own crate script, `Boxs.C`
+(object type 34 of that level), so everything the crates do is what the game's scripts do: spinning into them or jumping on them breaks them, the "?" crates give Wumpa fruit, the Aku Aku crate gives the mask, TNT counts down and explodes, Nitro explodes when touched,
+the arrow crate bounces, the "!" crates switch the outlined crates on. Nothing about their behaviour is written here. The subtype of the crate script says which crate it is; the wall is
+(rows from the bottom) wooden / "?" / TNT / Nitro / arrow / slats / Crash / Aku Aku mask in a mix (`kWall` in `props.cpp`). They are made once, when the level has been running for a moment and the engine is not reading the disc, as one transaction (a call that fails is undone and the wall is left out).
+
+Found by trying: the subtypes of the crate script were created one by one next to Crash and looked at. Safe ones: 0 2 3 4 5 6 7 8 9 10 13 14 16 18 19 21-30 34-38; creating 1 11 12 15 17 20 31 32 33 39 fails inside the game (they need entries or data this level does not have).
+
+## Why the warp room's crate is not a real object (yet)
+
+The "?" crate in the warp room is the **host** crate of the first section: the game's own model and textures, drawn among the game's polygons, with a collision made from its box. It has the game's size (checked by drawing it over the game's own crate in Turtle Woods: the scale 1.0 hides it completely, 1.02 already shows a rim),
+but it is not a game object, so it cannot do what the game's crates do: spinning into it does nothing, no fruit comes out, and Crash's shadow (a game object that projects onto the level's floor) falls on the floor below it.
+To make it a real crate in the warp room, the warp room's level file has to get the crate script and what it needs. The warp room has `Bp10` and `Bd10` (the models of the "?" and the red "X" crate), `Frui.C` (the fruit) and `Part.C` (particles), but not `Boxs.C`, the other crate models and their textures.
+Adding them is a change of that level's file (entries repacked, the NSD index rebuilt: `docs/EDITING.md`) and is the next step; the test ISO `c2_custom_models_test` (a modified warp room with a custom model) is the model for it.
 ## Why not a GOOL script?
 
 The game's own scripts are GOOL ("Game Object Oriented Lisp"), the language the original objects are written in (`docs/GOOL.md`). Three levels of doing this were considered:

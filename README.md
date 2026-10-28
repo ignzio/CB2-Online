@@ -9,9 +9,9 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 > **You need your own copy of the game.** CB2-Online contains no game data: on the first start it asks for **your own disc image** of Crash Bandicoot 2
 > (European PAL, `SCES_009.67`, or American NTSC-U, `SCUS_941.54`) and copies the files it needs. See [Install](#install) and [NOTICE.md](NOTICE.md).
 
-**Contents:** [Features](#features) · [Install](#install) · [Playing online](#playing-online) · [Controls](#controls) · [In-game menu](#in-game-menu) ·
-[Level times and records](#level-times-and-records) · [Graphics and speed](#graphics-and-speed) · [Save states](#save-states) · [Settings](#settings-cb2cfg) ·
-[Updates](#updates) · [How it works](#how-it-works) · [For developers](#for-developers) · [Known limits](#known-limits) · [Legal](#legal)
+**Contents:** [Features](#features) Â· [Install](#install) Â· [Playing online](#playing-online) Â· [Controls](#controls) Â· [In-game menu](#in-game-menu) Â·
+[Level times and records](#level-times-and-records) Â· [Graphics and speed](#graphics-and-speed) Â· [Save states](#save-states) Â· [Settings](#settings-cb2cfg) Â·
+[Updates](#updates) Â· [How it works](#how-it-works) Â· [For developers](#for-developers) Â· [Known limits](#known-limits) Â· [Legal](#legal)
 
 ## Features
 
@@ -38,18 +38,18 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 
 **Graphics and sound**
 - **OpenGL renderer** at up to 8x the original resolution (default 4x) with unrounded vertex positions, so the geometry does not wobble.
-- **60 fps smoothing** (optional, **unstable**, *Esc → Settings → Experimental*): the game draws 30 pictures per second; this draws the pictures in between.
+- **60 fps smoothing** (optional, **unstable**, *Esc â†’ Settings â†’ Experimental*): the game draws 30 pictures per second; this draws the pictures in between.
 - **Smooth textures** (optional): bilinear filtering instead of the blocky texels. **Perspective-correct textures** (optional): no more swimming textures on floors and walls.
-- **Native world** (optional, **unstable**, *Esc → Settings → Experimental*): the level scenery is drawn by OpenGL straight from the level files, with a depth buffer and perspective-correct textures, instead of from the polygons the console's code projected. It is what makes widescreen show real geometry in the side margins, and it moves the camera exactly for the 60 fps pictures in between. Water and other see-through polygons stay the game's own.
-- **Widescreen** (optional, **unstable**, *Esc → Settings → Experimental*): the picture at your window's aspect ratio (see the limits below).
-- **Skip the intro** (*Esc → Settings → Skip the intro*, on by default): a new game starts in the warp room instead of playing the logos, the title and the story. The first start plays the game to the warp room unthrottled in the background (20 to 60 seconds, on a blank memory card kept in memory) and saves that moment; every later start loads it in two seconds. Not used when your card already has a save. [docs/SKIP_INTRO.md](docs/SKIP_INTRO.md).
-- **Props** (optional, **unstable**, *Esc → Settings → Experimental*): things that are not in the game but live in it. The first one is the game's own "?" crate (its model and textures are read from your Turtle Woods file) in the warp room: Crash cannot walk through it and bounces on it when he jumps on it; it is drawn among the game's own polygons and acts on Crash through the game's own jump code. Your own crates go in `props.txt`. How it works, and why it is not a GOOL script yet: [docs/PROPS.md](docs/PROPS.md).
+- **Native world** (optional, **unstable**, *Esc â†’ Settings â†’ Experimental*): the level scenery is drawn by OpenGL straight from the level files, with a depth buffer and perspective-correct textures, instead of from the polygons the console's code projected. It is what makes widescreen show real geometry in the side margins, and it moves the camera exactly for the 60 fps pictures in between. Water and other see-through polygons stay the game's own.
+- **Widescreen** (optional, **unstable**, *Esc â†’ Settings â†’ Experimental*): the picture at your window's aspect ratio (see the limits below).
+- **Skip the intro** (*Esc → Settings → Skip the intro*, on by default): a new game starts in the warp room instead of playing the logos, the title and the story. The game's first level is a constant in its own `main()` (`ori a0, zero, 0x3C`, the title); the program changes it to 2 in memory, which is all a modified executable does, so nothing on the disc or in a file is changed and no save state is involved. The warp room's own opening scene still plays (`Tab` speeds it up). Not used when your card already has a save. [docs/SKIP_INTRO.md](docs/SKIP_INTRO.md).
+- **Props** (optional, **unstable**, *Esc â†’ Settings â†’ Experimental*): things that are not in the game but live in it. The first one is the game's own "?" crate (its model and textures are read from your Turtle Woods file) in the warp room: Crash cannot walk through it and bounces on it when he jumps on it; it is drawn among the game's own polygons and acts on Crash through the game's own jump code. Your own crates go in `props.txt`. How it works, and why it is not a GOOL script yet: [docs/PROPS.md](docs/PROPS.md).
 - **High refresh rates:** with 60 fps smoothing on a 90+ Hz monitor every refresh shows its own picture (160 Hz = 160 distinct pictures a second).
 - Display filters (nearest / bilinear / sharp bilinear), fullscreen, vsync, 4:3 picture whatever the window shape.
 - Volume slider; the original sound and music.
 
 **Bug reports**
-- Esc → **Report a bug** opens a GitHub issue in your browser with your version, system, graphics card, settings and the last crash filled in. Nothing is sent until you press Submit.
+- Esc â†’ **Report a bug** opens a GitHub issue in your browser with your version, system, graphics card, settings and the last crash filled in. Nothing is sent until you press Submit.
 - If the game crashes it writes `crash.log` and a minidump `crash.dmp` next to the game (what failed, where, the loaded modules, the last events), and every session keeps an event log, `cb2-session.log`, that survives a killed process; a game that stops responding is recorded too (`hang.dmp`). If it vanishes without an error (killed, graphics driver reset) the next start notices that as well. Either way, the next start offers to open the bug report for you and shows the crash files; each release has a link map that turns the addresses into function names. See [docs/CRASHES.md](docs/CRASHES.md).
 
 **Controls**
@@ -137,9 +137,9 @@ Left-Right or dragging to move a slider, `Esc` / B / right click to go back.
 
 | Page | What is on it |
 | --- | --- |
-| **Settings → Display** | fullscreen, display filter, **textures** (sharp / smooth), **perspective** correction, vsync |
-| **Settings → Sound and timer** | volume, level timer |
-| **Settings → Experimental** | **native world**, **widescreen**, **60 fps smoothing** and **props** (all marked **UNSTABLE**: they can flicker, miss parts or glitch; off is the safe choice) |
+| **Settings â†’ Display** | fullscreen, display filter, **textures** (sharp / smooth), **perspective** correction, vsync |
+| **Settings â†’ Sound and timer** | volume, level timer |
+| **Settings â†’ Experimental** | **native world**, **widescreen**, **60 fps smoothing** and **props** (all marked **UNSTABLE**: they can flicker, miss parts or glitch; off is the safe choice) |
 | **Online** | name tags, **opacity of the other players**, the player list |
 | **Records** | your best time and runs per level |
 | **Controls** | keyboard and game pad bindings side by side; `Enter` rebinds, `Del` clears, a key already in use swaps |
@@ -181,8 +181,8 @@ Everything in the menu is remembered in `cb2.cfg` next to `Crash2.exe`; the file
 | `name`, `room` | your name above your Crash; the room you meet people in |
 | `scale` | internal resolution multiplier (1-8) |
 | `game`, `game_pal`, `region` | the American and European game folders; `region = auto` (default) / `pal` / `ntsc` chooses which one to play when both are installed |
-| `volume`, `filter`, `timer` | *Settings → Sound and timer* and *Display* |
-| `textures`, `perspective`, `native_world`, `widescreen`, `smooth`, `vsync`, `refresh_rate` | *Settings → Display* and *Experimental* (`widescreen` and `smooth` are on the Experimental page; `refresh_rate = 0` uses your monitor's rate) |
+| `volume`, `filter`, `timer` | *Settings â†’ Sound and timer* and *Display* |
+| `textures`, `perspective`, `native_world`, `widescreen`, `smooth`, `vsync`, `refresh_rate` | *Settings â†’ Display* and *Experimental* (`widescreen` and `smooth` are on the Experimental page; `refresh_rate = 0` uses your monitor's rate) |
 | `disc_speed` | how many times faster than the console's drive the game's disc reads are (1-24, default 16) |
 | `nametags`, `opacity`, `roster` | the *Online* page |
 | `key_<button>`, `pad_<button>` | bindings |

@@ -36,7 +36,7 @@ public:
     // Reads the props of the player's own file (props.txt next to the game; see docs/PROPS.md). Without the file, or when it holds no valid line, the built-in one stays. Returns how many were read.
     int loadFile(const std::string& path);
     bool enabled = false;                             // the menu's switch (Experimental > Props)
-    void stateLoaded() { player = 0; boxes.clear(); boxesLevel = 0xFFFFFFFFu; lastProbeCount = ~0ull; }
+    void stateLoaded() { player = 0; boxes.clear(); boxesLevel = 0xFFFFFFFFu; lastProbeCount = ~0ull; wallLevel = 0xFFFFFFFFu; wallDone = false; }
     const std::vector<Box>& current() const { return boxes; }
     struct Placement { uint32_t level; float x, z, floorY, scale; int32_t bounce; std::string model; };
     struct Camera {
@@ -46,6 +46,7 @@ public:
         float h = 0, ofx = 0, ofy = 0;
     };
     const Camera& camera() const { return cam; }
+    int wallCrates() const { return wallCount; }               // real crates of the wall in Turtle Woods (see maybeBuildWall)
     uint64_t bounces = 0, drawnFrames = 0;            // how many times the prop sent Crash up, and how many pictures it was drawn into
 
 private:
@@ -62,6 +63,14 @@ private:
     Camera cam;
     r3000::GteSample probe;                           // the last scenery vertex the GTE projected (Cpu::probe): its matrix and offsets are the camera of the frame
     uint32_t stepping = 0;
+    // The wall of crates in Turtle Woods: real objects of the game's own crate script (Boxs.C), made with the engine's own creation routine, so they do what the game's crates do
+    // (break when spun into or jumped on, give their fruit, explode, bounce, switch on the ghost crates ...). See docs/PROPS.md.
+    uint32_t wallLevel = 0xFFFFFFFFu;
+    bool wallDone = false;
+    int wallCount = 0;
+    uint64_t wallCheckedFrame = ~0ull, wallQuietSince = 0, wallLastSectors = ~0ull;
+    std::vector<uint8_t> undoRam, undoScratch;
+    void maybeBuildWall();
 
     static uint32_t F(int n) { return uint32_t(0x40 + 4 * n); }
     bool isObject(uint32_t a);

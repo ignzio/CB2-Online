@@ -28,6 +28,7 @@ struct Profile {
     uint32_t cardStub[3];            // PsyQ memory card routines that are answered by the platform
     // globals
     uint32_t playerGlobal, puppetParent, currentLevel, cameraPos, vsyncCounter, exeSizeWord;
+    uint32_t bootLevelInsn;          // the `ori a0, zero, 0x3C` in main() that names the first level the game opens (the title); changing the 0x3C starts the game in another level
     uint32_t pageTable;              // the engine's table of page slots (count, then 0x2C bytes per slot; the byte at +0xF of a slot is how many objects hold its page)
 };
 
@@ -37,7 +38,7 @@ inline const Profile& ntsc() {
                               {0x80042420, 0x800426A0, 0x8004274C},
                               0x8004A5CC, 0x8004A5F4,
                               {0x8004A2C4, 0x8004A2D8, 0x8004A364},
-                              0x8006CB10, 0x8006CB20, 0x8005F3EC, 0x80060768, 0x8005DC98, 0x8005F188, 0x800675B0};
+                              0x8006CB10, 0x8006CB20, 0x8005F3EC, 0x80060768, 0x8005DC98, 0x8005F188, 0x800117E4, 0x800675B0};
     return p;
 }
 
@@ -47,7 +48,7 @@ inline const Profile& pal() {
                               {0x800426B8, 0x80042938, 0x800429E4},
                               0x8004A864, 0x8004A88C,
                               {0x8004A55C, 0x8004A570, 0x8004A5FC},
-                              0x8006CDA8, 0x8006CDB8, 0x8005F684, 0x80060A00, 0x8005DF30, 0x8005F420, 0x80067848};
+                              0x8006CDA8, 0x8006CDB8, 0x8005F684, 0x80060A00, 0x8005DF30, 0x8005F420, 0x800117E4, 0x80067848};
     return p;
 }
 

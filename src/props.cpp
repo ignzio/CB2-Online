@@ -1,5 +1,7 @@
 #include "props.hpp"
 
+#include "entity.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -17,6 +19,10 @@ constexpr float kLandMargin = 70.0f;      // how far past the edge of the top Cr
 constexpr float kNear = 250.0f;           // polygons with a corner nearer than this to the camera are not drawn (there is no clipping)
 constexpr float kSquashDepth = 0.14f;     // how much of its height the prop gives under a bounce
 constexpr uint32_t kCrateLevel = 0x1E;    // Turtle Woods: its level file holds the crates
+constexpr uint32_t kCrateScript = 0x4AC42E4Du;   // the entry id of Boxs.C, the game's crate script (object type 34 in that level)
+constexpr uint32_t kCrateType = 34;
+constexpr int kMarkerField = 63;          // an unused field of the objects made here: tells them from the game's own
+constexpr uint32_t kMarker = 0x50524F50;  // "PROP"
 bool debug() { static const bool d = std::getenv("CB2_PROPLOG") != nullptr; return d; }
 
 // Where the props are. The warp room (level 2; the European language copies count as 2): on the floor ring of the room, a few steps to the right of where Crash starts, between the start and the Snow Go door.
@@ -127,7 +133,71 @@ void Props::install() {
     p.cpu.probePcs = cb2game::current().sceneryProjection;
 }
 
-void Props::onStepEnter(uint32_t obj) { stepping = obj; }
+void Props::onStepEnter(uint32_t obj) {
+    stepping = obj;
+    if (enabled && p.frames != wallCheckedFrame) { wallCheckedFrame = p.frames; maybeBuildWall(); }
+}
+
+// The crates of the wall: the subtype of the game's crate script says what a crate is (the script is the game's: what each one does is whatever the game does). Found by making one of
+// each and looking at it: 2 plain wooden, 10 and 14 "?" (fruit), 0 and 16 TNT, 18 Nitro, 3 arrow (bounce), 6 slats, 8 Crash (extra life), 9 Aku Aku mask, 4 5 7 13 19 23 24 the outlines of the
+// crates the "!" crate switches on, 21 25 27-30 35-38 other wooden ones. Rows from the bottom, columns from left to right as seen from the start of the level.
+const int kWall[4][8] = {
+    {2, 10, 0, 2, 18, 10, 2, 6},
+    {10, 8, 2, 3, 2, 14, 16, 2},
+    {2, 2, 10, 9, 10, 2, 2, 10},
+    {14, 2, 16, 10, 2, 18, 10, 14},
+};
+
+// Turtle Woods has one crate of the game's own (a "?" crate at the start of the first path). When the level has been running for a moment and the engine is not reading the disc, a wall of real
+// crates is made beside it, once per time the level is entered: the object-creation routine of the engine is called with the template's own parent, as the engine does when it builds a zone.
+void Props::maybeBuildWall() {
+    const uint32_t lv = levelNow();
+    if (lv != wallLevel) { wallLevel = lv; wallDone = false; wallCount = 0; wallQuietSince = 0; }
+    if (wallDone || lv != kCrateLevel || !findPlayer()) return;
+    if (p.cd.sectorsRead != wallLastSectors) { wallLastSectors = p.cd.sectorsRead; wallQuietSince = p.frames; return; }
+    if (p.frames < wallQuietSince + 45) return;   // the engine is still loading
+    // the game's own crate to take the parent and the place from, and a check that the wall is not here already (a loaded state keeps it)
+    uint32_t tmpl = 0;
+    int ours = 0;
+    for (uint32_t a = kRamLow; a < kRamHigh - 0x280; a += 4) {
+        if (!isObject(a)) continue;
+        if (p.peek32(a + F(kMarkerField)) == kMarker) { ++ours; continue; }
+        const uint32_t e = p.peek32(a + 0xC);
+        if (!tmpl && p.peek32(a + F(29)) == 10 && e >= kRamLow && e < kRamHigh - 16 && p.peek32(e + 4) == kCrateScript) tmpl = a;
+    }
+    if (ours) { wallDone = true; wallCount = ours; return; }
+    if (!tmpl) return;
+    const uint32_t parent = p.peek32(tmpl + 0x44);
+    const float tx = float(int32_t(p.peek32(tmpl + F(kX)))) / 256.0f, ty = float(int32_t(p.peek32(tmpl + F(kY)))) / 256.0f, tz = float(int32_t(p.peek32(tmpl + F(kZ)))) / 256.0f;
+    constexpr float kEdge = 400.0f;   // the crate's edge, measured from the game's own model (398) and its transform
+    // A call into the game that fails halfway has already changed the engine's memory: it is put back, and the wall is not tried again in this level.
+    const uint64_t oldBudget = p.callBudget;
+    p.callBudget = 600'000;
+    undoRam.assign(p.ram.begin(), p.ram.end());
+    undoScratch.assign(p.cpu.scratch, p.cpu.scratch + sizeof p.cpu.scratch);
+    int made = 0;
+    try {
+        for (int row = 0; row < 4; ++row)
+            for (int col = 0; col < 8; ++col) {
+                const uint32_t o = p.callFunction(cb2game::current().createObject, {parent, kCrateType, uint32_t(kWall[row][col]), 0}, {0, 0});
+                if (!isObject(o)) continue;
+                p.poke32(o + F(kX), uint32_t(int32_t((tx + (float(col) - 3.5f) * kEdge) * 256.0f)));
+                p.poke32(o + F(kY), uint32_t(int32_t((ty + float(row) * kEdge) * 256.0f)));
+                p.poke32(o + F(kZ), uint32_t(int32_t((tz - 1000.0f) * 256.0f)));
+                p.poke32(o + F(kMarkerField), kMarker);
+                ++made;
+            }
+    } catch (const std::exception& e) {
+        std::memcpy(p.ram.data(), undoRam.data(), undoRam.size());
+        std::memcpy(p.cpu.scratch, undoScratch.data(), undoScratch.size());
+        std::printf("props: the wall of crates could not be made (%s)\n", e.what());
+        made = 0;
+    }
+    p.callBudget = oldBudget;
+    wallDone = true;
+    wallCount = made;
+    std::printf("props: a wall of %d real crates in Turtle Woods\n", made);
+}
 
 void Props::onStepReturn() {
     const uint32_t obj = stepping;

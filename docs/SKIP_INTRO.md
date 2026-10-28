@@ -1,23 +1,31 @@
 # Skipping the intro
 
-A new game of Crash Bandicoot 2 starts with a long intro: the logos, the title, the story cutscene and Crash walking into the warp room. **Settings > Skip the intro** (on by default; `skip_intro = off` in `cb2.cfg`) starts a new game in the warp room instead. This is what makes a multiplayer room start together in the warp room, and a speedrun practice start at once.
+A new game of Crash Bandicoot 2 starts with the logos, the title, a long story cutscene and then the first visit to the warp room. **Settings > Skip the intro** (on by default; `skip_intro = off` in `cb2.cfg`, or `CB2_NOSKIP=1`) starts a new game **in the warp room**.
 
-## How it works
+## How it works: the boot level, not a save state
 
-The game is not changed. The first time (per release: the European and the American game each have their own):
+The game's `main()` ends with a call that opens its first level, and the number it passes is a constant in the program: `ori a0, zero, 0x3C` at `0x800117E4` (the same address in both releases), the level of the logos and the title. A modified executable
+(the `SCUS_941.54` / `SCES_009.67` file of the disc) that has `0x02` there starts a new game in level 2, the warp room: the test ISO `c2_custom_models_test` that was supplied for this work differs from the retail PAL executable in exactly that one byte, and starts the same way.
+The program makes the same change **in memory**, when the game is about to run that instruction (a hook one instruction earlier), so no file of the disc, the game folder or the memory card is touched. The profile of each release keeps the address (`bootLevelInsn` in `game_profile.hpp`).
 
-1. The program runs the game unthrottled from the boot, pressing Start now and then, on a **blank memory card kept in memory** (your real card is not read or written meanwhile, and its image is put back afterwards), until Crash stands in the warp room of a new game. It takes 20 to 60 seconds, and the window title says so.
-2. It saves the whole console there as a save state: `states\warproom.cb2state` (`states\pal-warproom.cb2state` for the European release).
+There is no save state, no waiting for a first run, and nothing is stored on disk.
 
-Every later start loads that state (about two seconds). Your saved games are not touched: save states do not contain the memory card.
+## What you see: the warp room's own scene
+
+The warp room is opened the way the game opens it for a new game, and its first scene plays: Dr. Neo Cortex talks to Crash and Crash is dropped into the room (about 35 seconds, as in the game; the pad's Start only pauses it). When Crash can be controlled, you are in the warp room.
+`Tab` runs the scene at full speed.
+
+The scene is played by the game's own scripts, which wait for it to end. Leaving it out is not possible without leaving Crash's camera in the scene (tried: skipping the creation of the scene's objects removes Cortex, but the camera of the scene never ends). Starting the warp room from the
+"returning from a level" spawn point, which has no scene, is the way to get rid of it; that spawn is chosen by game variables that have not been found yet (see the end).
 
 ## When it does not happen
 
-* The memory card already has a Crash 2 save: you have the title screen's Continue, which is where you want to be.
+* The memory card already has a Crash 2 save: you have the title screen's *Continue*, which is where you want to be, and a game that did not go through it must not write a new save over yours.
 * A save state, a scripted press, `--autostart` or `--native` decide where the game starts.
-* You switch it off in the menu or in `cb2.cfg` (from the next start), or set `CB2_NOSKIP=1`.
-* The saved warp room cannot be loaded (a state of another version of the program): it is deleted and made again.
-
-If the game does not reach the warp room within 40,000 frames, it gives up, puts your card back and plays the intro as usual; `cb2-session.log` says why.
+* You switch it off in the menu (from the next start) or in `cb2.cfg`.
 
 `CB2_FORCESKIP=1` makes a scripted run (a capture or a hidden window) skip the intro too; that is how it is tested.
+
+## Not done yet
+
+* The warp room's opening scene is still played. The way out is to find the variable the game uses to choose the spawn point of the warp room (the NSD of level 2 has 32 spawn points; the first is the new game's, the second is the usual entrance of the room), and set it with the same hook.
