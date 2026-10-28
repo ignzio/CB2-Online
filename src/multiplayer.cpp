@@ -85,7 +85,8 @@ void Multiplayer::install() {
         if (fg == pu.pose) { pu.badPose = fg; pu.badUntil = pl.frames + 120; }
         if (poseType(obj) == 1 || !recordValid(obj)) pl.poke32(obj + F(kFrameGroup), 0);
     });
-    p.onDisplayList = [this] { buildTags(); };
+    const auto previousList = p.onDisplayList;   // the props module may already have chained itself
+    p.onDisplayList = [this, previousList] { if (previousList) previousList(); buildTags(); };
     // The extra Crash's own script must not run: left alone it eventually executes a "return" and the engine deletes the object. Every
     // entry into the script interpreter for one of our objects is answered here with the usual "carry on" result.
     p.addHook(cb2game::current().runScript, [this](psx::Platform& pl) {

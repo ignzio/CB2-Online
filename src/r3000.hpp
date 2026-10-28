@@ -49,6 +49,11 @@ struct Cpu {
     std::vector<std::array<float, 3>>* sxyCapture = nullptr;
     std::vector<GteSample>* gteSamples = nullptr;   // when set, every projected vertex is recorded here
     std::vector<GteSample>* gteSamples2 = nullptr;  // a second consumer of the same record (the native world renderer)
+    // When probe is set, the last vertex projected by one of the three instructions probePcs (the engine's scenery projections) is kept in *probe, and probeCount counts them:
+    // the camera of the frame (props), without recording every vertex.
+    GteSample* probe = nullptr;
+    const uint32_t* probePcs = nullptr;
+    uint64_t probeCount = 0;
     uint64_t instructions = 0;
     int64_t budget = INT64_MAX;                // decremented by CB2_TICK in recompiled code
     bool fault = false;                        // set when an unmapped address was touched

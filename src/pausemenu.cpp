@@ -70,7 +70,7 @@ std::vector<PauseMenu::Item> PauseMenu::items() const {
     case Page::Settings: return {kGraphics, kSound, kExperimental, kBack};
     case Page::Sound: return {kVolume, kTimer, kBack};
     case Page::Graphics: return {kFullscreen, kFilter, kTextures, kPerspective, kVsync, kBack};
-    case Page::Experimental: return {kNative, kWide, kSmooth, kBack};
+    case Page::Experimental: return {kNative, kWide, kSmooth, kProps, kBack};
     case Page::Online: return {kTags, kOpacity, kRoster, kBack};
     default: return {};
     }
@@ -97,6 +97,7 @@ void PauseMenu::adjust(Item item, int d) {
     case kPerspective: s->perspective = !s->perspective; changed = true; break;
     case kNative: s->nativeWorld = !s->nativeWorld; changed = true; break;
     case kWide: s->widescreen = !s->widescreen; changed = true; break;
+    case kProps: s->props = !s->props; changed = true; break;
     case kSmooth: s->smooth = !s->smooth; changed = true; break;
     case kVsync: s->vsync = !s->vsync; changed = true; break;
     default: break;
@@ -126,7 +127,7 @@ void PauseMenu::activate(Item item) {
     case kMainMenu: mainSel = sel; page = Page::ConfirmMenu; confirmSel = 1; break;
     case kQuit: mainSel = sel; page = Page::ConfirmQuit; confirmSel = 1; break;
     case kBack: setPage(parentOf(page)); break;
-    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: case kTextures: case kPerspective: case kNative: case kWide: adjust(item, 1); break;
+    case kFilter: case kFullscreen: case kTags: case kRoster: case kTimer: case kSmooth: case kVsync: case kTextures: case kPerspective: case kNative: case kWide: case kProps: adjust(item, 1); break;
     default: break;
     }
 }
@@ -383,6 +384,10 @@ void PauseMenu::draw(double t) {
                 valueRow(idx, y, on, "60 FPS SMOOTHING", s->smooth ? "ON" : "OFF", kTeal);
                 badge(146 + canvas.width("60 FPS SMOOTHING", 22) + 12, y + 10);
                 break;
+            case kProps:
+                valueRow(idx, y, on, "PROPS", s->props ? "ON" : "OFF", kTeal);
+                badge(146 + canvas.width("PROPS", 22) + 12, y + 10);
+                break;
             case kVsync: valueRow(idx, y, on, "VSYNC", s->vsync ? "ON" : "OFF", kTeal); break;
             case kTags: valueRow(idx, y, on, "NAME TAGS", s->nameTags ? "ON" : "OFF", kTeal); break;
             case kRoster: valueRow(idx, y, on, "PLAYER LIST", s->roster ? "ON" : "OFF", kTeal); break;
@@ -396,7 +401,7 @@ void PauseMenu::draw(double t) {
             case kSettings: return {"DISPLAY, SOUND AND EXPERIMENTAL OPTIONS", "", false};
             case kGraphics: return {"FULLSCREEN, SHARPNESS, TEXTURES, PERSPECTIVE AND VSYNC", "", false};
             case kSound: return {"THE VOLUME AND THE LEVEL TIMER", "", false};
-            case kExperimental: return {"UNSTABLE: NATIVE WORLD, WIDESCREEN AND 60 FPS", "THEY CAN GLITCH. THE GAME WORKS WITHOUT THEM", true};
+            case kExperimental: return {"UNSTABLE: NATIVE WORLD, WIDESCREEN, 60 FPS AND PROPS", "THEY CAN GLITCH. THE GAME WORKS WITHOUT THEM", true};
             case kOnline: return {"NAME TAGS, THE PLAYER LIST AND HOW SOLID THE OTHERS ARE", "", false};
             case kRecords: return {"YOUR BEST TIME IN EVERY LEVEL", "", false};
             case kControls: return {"KEYBOARD AND GAME PAD BUTTONS", "", false};
@@ -412,6 +417,7 @@ void PauseMenu::draw(double t) {
             case kPerspective: return {"STRAIGHT TEXTURES ON SLANTED SURFACES", "THE CONSOLE'S WOBBLE IS GONE", false};
             case kSmooth: return {"UNSTABLE: IN-BETWEEN PICTURES FOR SMOOTHER MOTION", "BEST ON A HIGH REFRESH RATE MONITOR. CAN SHOW GLITCHES", true};
             case kVsync: return {"WAIT FOR THE MONITOR: NO TEARING", "OFF: FASTER REPLIES, THE PICTURE MAY TEAR", false};
+            case kProps: return {"UNSTABLE: A BOUNCY BOX IN THE WARP ROOM", "NOT PART OF THE GAME. JUMP ON IT TO BOUNCE", true};
             case kNative: return {"UNSTABLE: DRAWS THE LEVEL FROM ITS FILES", "IT CAN FLICKER OR MISS PARTS. OFF IS THE SAFE CHOICE", true};
             case kTags: return {"THE NAMES OVER THE OTHER PLAYERS", "", false};
             case kRoster: return {"THE PLAYER LIST AT THE RIGHT EDGE (F3)", "", false};

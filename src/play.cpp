@@ -34,6 +34,7 @@
 #include "glrender.hpp"
 #include "lobby.hpp"
 #include "multiplayer.hpp"
+#include "props.hpp"
 #include "pausemenu.hpp"
 #include "relaunch.hpp"
 #include "updater.hpp"
@@ -445,6 +446,9 @@ int main(int argc, char** argv) {
     // Personal records and the level timer work offline too; they need the interpreter (the hooks), like online play.
     cb2run::Tracker tracker(p, (std::filesystem::path(exeDir) / (release.region == cb2game::Region::Pal ? "records-pal.txt" : "records.txt")).string());   // 50 Hz times are not 60 Hz times: one file per release
     if (!nativeCode) tracker.install();
+    cb2prop::Props props(p);
+    if (!nativeCode) props.install();
+    if (const int n = props.loadFile((std::filesystem::path(exeDir) / "props.txt").string())) std::printf("props.txt: %d box(es)\n", n);
     mp.setTracker(&tracker);
     bool onlineStarted = false;
     // The lobby comes first when nothing on the command line already decided between playing alone and online.
@@ -526,6 +530,7 @@ int main(int argc, char** argv) {
     settings.widescreen = cfg.widescreen || std::getenv("CB2_WIDESCREEN") != nullptr;
     settings.perspective = cfg.perspective || std::getenv("CB2_PERSPECTIVE") != nullptr;
     settings.nativeWorld = cfg.nativeWorld || std::getenv("CB2_NATIVEWORLD") != nullptr;
+    settings.props = cfg.props || std::getenv("CB2_PROPS") != nullptr;
     settings.vsync = cfg.vsync;
     psx::FrameInterpolator interp;
     if (const char* g = std::getenv("CB2_GROW")) interp.grow = float(std::atof(g));   // tests
@@ -611,6 +616,7 @@ int main(int argc, char** argv) {
         cfg.remember(exeDir, "widescreen", settings.widescreen ? "on" : "off");
         cfg.remember(exeDir, "perspective", settings.perspective ? "on" : "off");
         cfg.remember(exeDir, "native_world", settings.nativeWorld ? "on" : "off");
+        cfg.remember(exeDir, "props", settings.props ? "on" : "off");
         cfg.remember(exeDir, "textures", settings.textures ? "smooth" : "sharp");
         cfg.remember(exeDir, "smooth", settings.smooth ? "on" : "off");
         cfg.remember(exeDir, "vsync", settings.vsync ? "on" : "off");
@@ -714,6 +720,7 @@ int main(int argc, char** argv) {
         uint32_t lvl = 0xFF;
         if (extra.size() >= 4) std::memcpy(&lvl, extra.data(), 4);
         mp.stateLoaded(lvl);
+        props.stateLoaded();
         tracker.stateLoaded(extra);
         interp.reset();
         t0 = glfwGetTime();
@@ -1121,6 +1128,7 @@ int main(int argc, char** argv) {
             break;
         }
         mp.showTags = settings.nameTags;
+        props.enabled = settings.props && useHires;
         for (Poke& pk : pokes) if (!pk.done && p.frames >= pk.frame) { pk.done = true; p.poke32(pk.addr, pk.value); std::printf("poked %08x = %08x at frame %llu\n", pk.addr, pk.value, (unsigned long long)p.frames); }
         mp.opacity = settings.opacity;
         for (FakeRequest& fr : fakeRequests) if (!fr.done && p.frames >= fr.frame) { fr.done = true; tracker.debugRequest(fr.level); }

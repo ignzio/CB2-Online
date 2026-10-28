@@ -42,6 +42,7 @@ player list, 60 fps smoothing and an in-game menu, and you have a game built for
 - **Smooth textures** (optional): bilinear filtering instead of the blocky texels. **Perspective-correct textures** (optional): no more swimming textures on floors and walls.
 - **Native world** (optional, **unstable**, *Esc → Settings → Experimental*): the level scenery is drawn by OpenGL straight from the level files, with a depth buffer and perspective-correct textures, instead of from the polygons the console's code projected. It is what makes widescreen show real geometry in the side margins, and it moves the camera exactly for the 60 fps pictures in between. Water and other see-through polygons stay the game's own.
 - **Widescreen** (optional, **unstable**, *Esc → Settings → Experimental*): the picture at your window's aspect ratio (see the limits below).
+- **Props** (optional, **unstable**, *Esc → Settings → Experimental*): things that are not in the game but live in it. The first one is a box in the warp room that Crash cannot walk through and bounces on when he jumps on it; it is drawn among the game's own polygons and acts on Crash through the game's own jump code. Your own boxes go in `props.txt`. How it works, and why it is not a GOOL script yet: [docs/PROPS.md](docs/PROPS.md).
 - **High refresh rates:** with 60 fps smoothing on a 90+ Hz monitor every refresh shows its own picture (160 Hz = 160 distinct pictures a second).
 - Display filters (nearest / bilinear / sharp bilinear), fullscreen, vsync, 4:3 picture whatever the window shape.
 - Volume slider; the original sound and music.
@@ -137,7 +138,7 @@ Left-Right or dragging to move a slider, `Esc` / B / right click to go back.
 | --- | --- |
 | **Settings → Display** | fullscreen, display filter, **textures** (sharp / smooth), **perspective** correction, vsync |
 | **Settings → Sound and timer** | volume, level timer |
-| **Settings → Experimental** | **native world**, **widescreen** and **60 fps smoothing** (all marked **UNSTABLE**: they can flicker, miss parts or glitch; off is the safe choice) |
+| **Settings → Experimental** | **native world**, **widescreen**, **60 fps smoothing** and **props** (all marked **UNSTABLE**: they can flicker, miss parts or glitch; off is the safe choice) |
 | **Online** | name tags, **opacity of the other players**, the player list |
 | **Records** | your best time and runs per level |
 | **Controls** | keyboard and game pad bindings side by side; `Enter` rebinds, `Del` clears, a key already in use swaps |

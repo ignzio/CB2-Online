@@ -47,6 +47,7 @@ bool Config::load(const std::string& exeDir) {
             else if (k == "refresh_rate") refreshRate = std::max(0, std::min(1000, std::atoi(v.c_str())));
             else if (k == "perspective") perspective = (v == "on" || v == "1" || v == "yes" || v == "true");
             else if (k == "native_world") nativeWorld = (v == "on" || v == "1" || v == "yes" || v == "true");
+            else if (k == "props") props = (v == "on" || v == "1" || v == "yes" || v == "true");
             else if (k == "widescreen") widescreen = (v == "on" || v == "1" || v == "yes" || v == "true");
             else if (k == "vsync") vsync = !(v == "off" || v == "0" || v == "no" || v == "false");
             else if (k == "roster") roster = !(v == "off" || v == "0" || v == "no" || v == "false");

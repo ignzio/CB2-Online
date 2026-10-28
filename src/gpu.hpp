@@ -105,6 +105,8 @@ public:
     uint64_t vblankCount = 0;   // vertical blanks so far (stamped into the Flip commands)
     uint64_t flipCount = 0;     // display flips recorded so far
     int dmaDirection() const { return dir; }
+    int drawOffsetX() const { return offX; }   // the GP0 drawing offset in effect now
+    int drawOffsetY() const { return offY; }
 
 private:
     struct Vtx { int x, y; int r, g, b; int u, v; float fx = 1e30f, fy = 1e30f, fz = 0; };   // fx/fy: precise position when known; fz: the GTE depth (0 = unknown)
