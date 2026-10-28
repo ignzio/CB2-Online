@@ -8,6 +8,7 @@
 // It hooks the game's object update (see multiplayer.hpp), so it needs the interpreter, and it adds to the host renderer's command list (Gpu::cmds), so it needs the hi-res renderer.
 // Units: the game keeps an object's position as 1/256 of a world unit; the camera position, the levels and everything here use world units, y up.
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -31,12 +32,12 @@ struct Box {
 
 class Props {
 public:
-    explicit Props(psx::Platform& platform) : p(platform) {}
+    explicit Props(psx::Platform& platform);
     void install();                                   // hooks the game; call once, with the interpreter
     // Reads the props of the player's own file (props.txt next to the game; see docs/PROPS.md). Without the file, or when it holds no valid line, the built-in one stays. Returns how many were read.
     int loadFile(const std::string& path);
     bool enabled = false;                             // the menu's switch (Experimental > Props)
-    void stateLoaded() { player = 0; boxes.clear(); boxesLevel = 0xFFFFFFFFu; lastProbeCount = ~0ull; wallLevel = 0xFFFFFFFFu; wallDone = false; }
+    void stateLoaded() { player = 0; boxes.clear(); boxesLevel = 0xFFFFFFFFu; lastProbeCount = ~0ull; crateLevel = 0xFFFFFFFFu; }
     const std::vector<Box>& current() const { return boxes; }
     struct Placement { uint32_t level; float x, z, floorY, scale; int32_t bounce; std::string model; };
     struct Camera {
@@ -46,7 +47,11 @@ public:
         float h = 0, ofx = 0, ofy = 0;
     };
     const Camera& camera() const { return cam; }
-    int wallCrates() const { return wallCount; }               // real crates of the wall in Turtle Woods (see maybeBuildWall)
+    // A crate of the game's own crate script placed in a level (world units, y = the floor under it; sub = the script's subtype, which says what kind of crate it is). It exists as a real game
+    // object only while Crash is near it (see streamCrates), so there can be as many as you like.
+    struct Crate { uint32_t level; float x, y, z; int sub; uint32_t obj = 0; bool gone = false; float madeX = 0, madeY = 0, madeZ = 0; };
+    int liveCrates() const { return liveCount; }               // crates that are real game objects right now
+    size_t crateCount() const { return crates.size(); }        // crates placed, near or not
     uint64_t bounces = 0, drawnFrames = 0;            // how many times the prop sent Crash up, and how many pictures it was drawn into
 
 private:
@@ -63,15 +68,18 @@ private:
     Camera cam;
     r3000::GteSample probe;                           // the last scenery vertex the GTE projected (Cpu::probe): its matrix and offsets are the camera of the frame
     uint32_t stepping = 0;
-    // The wall of crates in Turtle Woods: real objects of the game's own crate script (Boxs.C), made with the engine's own creation routine, so they do what the game's crates do
-    // (break when spun into or jumped on, give their fruit, explode, bounce, switch on the ghost crates ...). See docs/PROPS.md.
-    uint32_t wallLevel = 0xFFFFFFFFu;
-    bool wallDone = false;
-    int wallCount = 0;
-    uint64_t wallCheckedFrame = ~0ull, wallQuietSince = 0, wallLastSectors = ~0ull;
+    // The crates: placed in a list, made real (with the engine's own object-creation routine, as an object of the game's crate script Boxs.C) when Crash comes near and thrown away again when he
+    // is far, untouched. A real crate does everything the game's crate does, because it is the game's crate; one that was broken stays broken until the level is entered again.
+    std::vector<Crate> crates;
+    uint32_t crateLevel = 0xFFFFFFFFu, crateParent = 0, lastPlayer = 0;
+    bool crateAdopted = false, building = false;
+    int liveCount = 0;
+    uint64_t crateCheckedFrame = ~0ull, crateQuietSince = 0, crateLastSectors = ~0ull;
     std::vector<uint8_t> undoRam, undoScratch;
-    void maybeBuildWall();
-
+    void streamCrates();
+    void adoptCrates(uint32_t level);
+    bool isCrateObject(uint32_t a);
+    bool transact(const char* what, const std::function<void()>& f);   // calls into the game; when it fails the engine's memory is put back
     static uint32_t F(int n) { return uint32_t(0x40 + 4 * n); }
     bool isObject(uint32_t a);
     uint32_t findPlayer();

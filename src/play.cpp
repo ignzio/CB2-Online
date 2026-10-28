@@ -448,7 +448,7 @@ int main(int argc, char** argv) {
     if (!nativeCode) tracker.install();
     cb2prop::Props props(p);
     if (!nativeCode) props.install();
-    if (const int n = props.loadFile((std::filesystem::path(exeDir) / "props.txt").string())) std::printf("props.txt: %d box(es)\n", n);
+    if (const int n = props.loadFile((std::filesystem::path(exeDir) / "props.txt").string())) std::printf("props.txt: %d prop(s)\n", n);
     mp.setTracker(&tracker);
     bool onlineStarted = false;
     // The lobby comes first when nothing on the command line already decided between playing alone and online.

@@ -1,6 +1,6 @@
 # Props: things that are not in the game but live in it (experimental)
 
-**Pause menu > Settings > Experimental > Props.** Two things: the game's own **"?" crate** in the warp room (a host prop, below) and a **test wall of real crates in Turtle Woods** (real game objects, see "A wall of real crates"). Its model, its size and its textures are the game's: they are read at the start from the Turtle Woods level file on your own disc (the crate is in that file, `Bp10.G` / `Bp10.V`, 12 polygons, 398 units on a side), so nothing was invented or drawn by hand, and nothing of the game is stored by this program. The crate is not in the warp room's data: the game does not know it exists there. You can walk up to it (it is a wall at the sides) and jump on it (it is a spring on top), and
+**Pause menu > Settings > Experimental > Props.** Two things: the game's own **"?" crate** in the warp room (a host prop, below) and the **game’s own crates in Turtle Woods**, placed anywhere and in any number (real game objects made while Crash is near, see Crates of the game’s own script). Its model, its size and its textures are the game's: they are read at the start from the Turtle Woods level file on your own disc (the crate is in that file, `Bp10.G` / `Bp10.V`, 12 polygons, 398 units on a side), so nothing was invented or drawn by hand, and nothing of the game is stored by this program. The crate is not in the warp room's data: the game does not know it exists there. You can walk up to it (it is a wall at the sides) and jump on it (it is a spring on top), and
 Crash goes up like on a bounce crate. Switch it off and nothing of it is left. It works on both releases (NTSC-U and PAL) and with native world, widescreen and 60 fps smoothing on or off.
 
 ## How it works
@@ -49,15 +49,30 @@ The crates in the Turtle Woods file (the name is the animation's; all are 12-pol
 | `BC10` | checkpoint "C" (22 polygons, wider) | `BS10` | arrow (bounce up) |
 | `BF10` | wooden slats (20 polygons) | `BG10` | glass (see-through; the polygons are drawn solid) |
 
-They are drawn but not yet what they are in the game: every one of them is just a box that bounces (a TNT crate does not explode, a Nitro does not hurt).
-## A wall of real crates in Turtle Woods
+They are drawn but not yet what they are in the game: every one of them is just a box that bounces (a TNT crate does not explode, a Nitro does not hurt). For crates that are what they are in the game, see the next section.
 
-In **Turtle Woods** (with Props on) a test wall of 2 x 6 crates is made **right in front of Crash** (about 900 units ahead, on the way the camera looks), wherever he is when the level has been running for a moment, and again when a save state without it is loaded. These are **real game objects**: each one is made with the engine's own object-creation routine (`0x80019800`) as an object of the game's own crate script, `Boxs.C`
-(object type 34 of that level), so everything the crates do is what the game's scripts do: spinning into them or jumping on them breaks them, the "?" crate gives Wumpa fruit, the Aku Aku crate gives the mask, TNT counts down and explodes, Nitro explodes when touched,
-the arrow crate bounces. Nothing about their behaviour is written here. The subtype of the crate script says which crate it is; the wall is, bottom row: wooden / arrow / TNT / Nitro / slats / wooden, top row: "?" / Crash / Aku Aku mask / "?" / TNT / "?" (`kWall` in `props.cpp`). The outlined "ghost" crates and the "!" crate that switches them on are left out: they float up and down by design and are objects that run their script like any other.
-It is built once, when the engine is not reading the disc, as one transaction (a call that fails is undone and the wall is left out). It is small (12 objects, about a third of the first 32-crate wall) because every live crate runs its script every frame. `CB2_WALLSUBS=2,10,...` (a list of subtypes) builds another wall, for tests.
+## Crates of the game's own script, as many as you like (Turtle Woods)
 
-Found by trying: the subtypes of the crate script were created one by one next to Crash and looked at. Safe ones: 0 2 3 4 5 6 7 8 9 10 13 14 16 18 19 21-30 34-38; creating 1 11 12 15 17 20 31 32 33 39 fails inside the game (they need entries or data this level does not have).
+In **Turtle Woods** (with Props on) crates can be placed anywhere, in any number, and they are **the game's own crates**: spinning into them or jumping on them breaks them, "?" crates give their Wumpa fruit, the Aku Aku crate gives the mask, the Crash crate a life, TNT counts down and explodes,
+Nitro explodes when touched, the arrow crate bounces. None of that is written here: a crate that is near Crash is a real game object, made with the engine's own object-creation routine (`0x80019800`) as an object of the game's crate script `Boxs.C` (object type 34 of that level),
+so it is exactly what the game makes. The trick that makes the number unlimited is that a crate is only made **while Crash is near it** (within 2600 units, at most 20 at once, the nearest first) and is thrown away again, untouched, when he is far (3200). This is what the game itself does with its own entities. A crate that the game removed
+(broken, exploded, collected) stays removed until the level is entered again or Crash is made anew (a fall, a checkpoint). The cost is the cost of the crates that are near, about 0.1 ms of emulation per crate and frame; crates that are far cost nothing.
+
+A test field of 3 x 8 crates (every kind) is placed by default ahead of where Crash starts in Turtle Woods. Your own go in `props.txt` (the file replaces the default field when it has at least one of these lines):
+
+```
+# crate <level> <x> <floor y> <z> <subtype>
+crate  1E  45024  -13  172800  2
+# wall <level> <x> <floor y> <z> <x|z> <columns> <rows> <subtypes>   a grid, 400 apart, along x or z and upwards; the subtypes are used in turn
+wall   1E  43600  -13  172000  x  8  3  2,10,3,0,18,8,9,6
+```
+
+The positions are the game's world units (the same in both releases: Crash starts Turtle Woods at x 45024, floor -13, z 173336, running towards smaller z). `CB2_PROPLOG=1` prints what is made and what the game removed.
+The **subtype** says what a crate is: 2 wooden, 10 "?" (fruit), 0 TNT, 18 Nitro, 3 arrow (bounce), 6 slats, 8 Crash (extra life), 9 Aku Aku mask; also wooden 21 25 27-30 35-38 and "?" 26 34 (found by making one of each and looking), the outlined "ghost" crates 4 5 7 13 19 23 24 (they float up and down by design
+and appear solid when a "!" crate, subtype 22, is hit), 16 another TNT. Subtype 14 removes itself at once. Subtypes 1 11 12 15 17 20 31 32 33 39 fail inside the game (they need data this level does not have): the call is undone and the crate is left out.
+
+**Only in levels whose file has the crate script.** Turtle Woods has it; the warp room does not, so the warp room keeps the host crate below. Other levels have crate scripts of their own that this has not been taught yet.
+A state saved with crates of an older version of this feature has them taken away when it is loaded.
 
 ## Why the warp room's crate is not a real object (yet)
 
