@@ -139,12 +139,12 @@ void Props::onStepEnter(uint32_t obj) {
 }
 
 // The crates of the test wall: the subtype of the game's crate script says what a crate is (the script is the game's: what each one does is whatever the game does). Found by making one of
-// each and looking at it: 2 plain wooden, 10 "?" (fruit), 0 TNT, 18 Nitro, 3 arrow (bounce), 6 slats, 8 Crash (extra life), 9 Aku Aku mask, 22 the "!" crate that switches the outlines on,
-// 23 24 19 outlines of the crates it switches on. Rows from the floor up, columns from left to right as Crash sees them.
+// each and looking at it: 2 plain wooden, 10 and 14 "?" (fruit), 0 and 16 TNT, 18 Nitro, 3 arrow (bounce), 6 slats, 8 Crash (extra life), 9 Aku Aku mask. Only solid crates are used: the outlines
+// (4 5 7 13 19 23 24) and the "!" crate that switches them on are left out, they float and cost script time for nothing. Rows from the floor up, columns from left to right as Crash sees them.
 constexpr int kWallRows = 2, kWallCols = 6;
 const int kWall[kWallRows][kWallCols] = {
-    {23, 3, 22, 0, 18, 24},
-    {10, 8, 9, 6, 2, 19},
+    {2, 3, 0, 18, 6, 2},
+    {10, 8, 9, 14, 16, 10},
 };
 
 // A test wall of real crates ahead of Crash, once per time Turtle Woods is entered (and when a state without it is loaded): the object-creation routine of the engine is called as the
