@@ -225,8 +225,6 @@ bool frameVertices(const AnimFrame& f, const Model& m, std::vector<std::array<in
     return true;
 }
 
-namespace {
-
 const TexInfo* resolveModelTexture(const Model& m, int texId, bool animated, int frame) {
     if (texId == 0 && !animated) return nullptr;
     int idx = texId - 1;
@@ -249,8 +247,6 @@ const TexInfo* resolveModelTexture(const Model& m, int texId, bool animated, int
     }
     return idx >= 0 && idx < int(m.textures.size()) ? &m.textures[size_t(idx)] : nullptr;
 }
-
-}  // namespace
 
 void buildModelMesh(const Model& m, const AnimFrame& f, const PageAtlas& atlas, int texFrame, std::vector<GpuVertex>& out) {
     std::vector<std::array<int, 3>> verts;

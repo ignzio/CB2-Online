@@ -33,7 +33,7 @@ struct Settings {
     int textures = 0;        // 0 sharp, 1 smooth (bilinear texture filtering)
     bool perspective = false; // perspective-correct texturing
     bool nativeWorld = false; // draw the level scenery natively from the level files instead of the game's own polygons (unstable)
-    bool props = false;       // props: things that are not in the game but live in it (a bouncy box in the warp room; unstable)
+    bool props = false;       // props: things that are not in the game but live in it (a bouncy crate in the warp room; unstable)
     bool widescreen = false;  // show the picture at the window's aspect ratio instead of 4:3
     bool vsync = true;       // wait for the monitor's refresh when showing a picture
     cb2input::Keys keys;     // keyboard and game pad bindings

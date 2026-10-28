@@ -417,7 +417,7 @@ void PauseMenu::draw(double t) {
             case kPerspective: return {"STRAIGHT TEXTURES ON SLANTED SURFACES", "THE CONSOLE'S WOBBLE IS GONE", false};
             case kSmooth: return {"UNSTABLE: IN-BETWEEN PICTURES FOR SMOOTHER MOTION", "BEST ON A HIGH REFRESH RATE MONITOR. CAN SHOW GLITCHES", true};
             case kVsync: return {"WAIT FOR THE MONITOR: NO TEARING", "OFF: FASTER REPLIES, THE PICTURE MAY TEAR", false};
-            case kProps: return {"UNSTABLE: A BOUNCY BOX IN THE WARP ROOM", "NOT PART OF THE GAME. JUMP ON IT TO BOUNCE", true};
+            case kProps: return {"UNSTABLE: A BOUNCY CRATE IN THE WARP ROOM", "NOT PART OF THE ROOM. JUMP ON IT TO BOUNCE", true};
             case kNative: return {"UNSTABLE: DRAWS THE LEVEL FROM ITS FILES", "IT CAN FLICKER OR MISS PARTS. OFF IS THE SAFE CHOICE", true};
             case kTags: return {"THE NAMES OVER THE OTHER PLAYERS", "", false};
             case kRoster: return {"THE PLAYER LIST AT THE RIGHT EDGE (F3)", "", false};

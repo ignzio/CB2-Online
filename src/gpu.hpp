@@ -24,6 +24,7 @@ struct GpuCmd {
     uint8_t semiMode = 0, depth = 0, tpx = 0, tpy = 0, twMX = 0, twMY = 0, twOX = 0, twOY = 0;
     uint16_t clutX = 0, clutY = 0;
     uint8_t alpha = 255;                   // Tri: opacity the host renderer gives it (other players' Crashes, see markAlpha); 255 = the game's own look
+    bool prop = false;                     // Tri: textured from Gpu::propAtlas (a prop, see props.hpp) instead of from VRAM: u, v are texel coordinates in the atlas
     bool world = false;                    // Tri: part of the level scenery (see Gpu::tagWorld); a native world renderer draws these itself
     int16_t worldOff[2] = {0, 0};          // Tri with `world`: the draw offset its corners were projected for
     uint32_t nativePoly = 0xFFFFFFFFu;     // Tri with `world`: the level polygon the native renderer draws instead (its number in the level)
@@ -57,6 +58,9 @@ public:
     // lies over everything the game drew, whatever the order of its display lists).
     void queueTag(TextTag t) { t.offX = offX; t.offY = offY; pendingTags.push_back(std::move(t)); }
     std::vector<std::string> textPool;
+    // The textures of props: 1024 x 256 colours (four 256 x 256 pictures side by side; 15 bit, 0 = transparent), outside the console's video memory so that no level can be in their way. The renderer re-uploads it when the version changes.
+    std::vector<uint16_t> propAtlas;
+    uint32_t propAtlasVersion = 0;
     // Other players' Crashes can be drawn see-through: the vertices (screen positions before the draw offset, as the GTE projected them) that belong to
     // them are marked with markAlpha during the frame, and every recorded triangle whose three vertices are all marked gets `alphaValue`. The marks are
     // dropped by flushTags at the end of the frame.

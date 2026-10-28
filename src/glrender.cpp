@@ -26,16 +26,18 @@ void main() {
 }
 )";
 
-// a = (page x, page y, depth, flags: 1 textured, 2 raw, 4 opaque texels only, 8 semi-transparent texels only, bits 16..23 opacity 1..254 (0 = solid))
+// a = (page x, page y, depth, flags: 1 textured, 2 raw, 4 opaque texels only, 8 semi-transparent texels only, 32 the texture is in the prop atlas, bits 16..23 opacity 1..254 (0 = solid))
 // b = (clut x, clut y, window mask x | y << 8, window offset x | y << 8)
 const char* kMainFrag = R"(#version 330 core
 in vec2 vUv; noperspective in vec3 vCol; flat in ivec4 vA; flat in ivec4 vB; flat in vec4 vBounds;
 out vec4 o;
 uniform usampler2D vram;
+uniform usampler2D propTex;   // the textures of props (flag 32): four 256 x 256 pictures side by side, 15-bit colours
 uniform int texFilter;   // 0 nearest (the console's own look), 1 bilinear
 uint fetch(int x, int y) { return texelFetch(vram, ivec2(x & 1023, y & 511), 0).r; }
 // One texel of the polygon's texture page (palette and texture window applied); 0 = transparent.
 uint texel(int u, int v) {
+    if ((vA.w & 32) != 0) return texelFetch(propTex, ivec2(clamp(u, 0, 1023), clamp(v, 0, 255)), 0).r;
     u &= 255; v &= 255;
     int mx = vB.z & 255, my = (vB.z >> 8) & 255, ox = vB.w & 255, oy = (vB.w >> 8) & 255;
     u = (u & ~(mx * 8)) | ((ox & mx) * 8);
@@ -153,12 +155,19 @@ bool HiResRenderer::init(int scale) {
     compProg = program(kBlitVert, kCompositeFrag);
     mainVram = glGetUniformLocation(mainProg, "vram");
     mainFilter = glGetUniformLocation(mainProg, "texFilter");
+    mainProp = glGetUniformLocation(mainProg, "propTex");
     blitRect = glGetUniformLocation(blitProg, "rect");
     blitTex = glGetUniformLocation(blitProg, "tex");
 
     glGenTextures(1, &vramTex);
     glBindTexture(GL_TEXTURE_2D, vramTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, 1024, 512, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glGenTextures(1, &propTex);
+    glBindTexture(GL_TEXTURE_2D, propTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, 1024, 256, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -222,6 +231,10 @@ void HiResRenderer::flush() {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, vramTex);
     glUniform1i(mainVram, 0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, propTex);
+    glUniform1i(mainProp, 1);
+    glActiveTexture(GL_TEXTURE0);
     glUniform1i(mainFilter, textureFilter);
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -258,7 +271,7 @@ void HiResRenderer::pushTri(const GpuCmd& c0, int passFlag) {
         v.x = c.x[i]; v.y = c.y[i]; v.u = c.u[i]; v.v = c.v[i];
         v.r = c.col[i][0] / 255.0f; v.g = c.col[i][1] / 255.0f; v.b = c.col[i][2] / 255.0f;
         v.a[0] = c.tpx; v.a[1] = c.tpy; v.a[2] = c.depth;
-        v.a[3] = (c.textured ? 1 : 0) | (c.raw ? 2 : 0) | passFlag | (c.alpha < 255 ? int(c.alpha ? c.alpha : 1) << 16 : 0);
+        v.a[3] = (c.textured ? 1 : 0) | (c.raw ? 2 : 0) | (c.prop ? 32 : 0) | passFlag | (c.alpha < 255 ? int(c.alpha ? c.alpha : 1) << 16 : 0);
         v.b2[0] = c.clutX; v.b2[1] = c.clutY;
         v.b2[2] = c.twMX | (c.twMY << 8);
         v.b2[3] = c.twOX | (c.twOY << 8);
@@ -356,6 +369,11 @@ void HiResRenderer::render(Gpu& gpu) {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RED_INTEGER, GL_UNSIGNED_SHORT, gpu.vram.data());
 
+    if (gpu.propAtlasVersion != propVersion && gpu.propAtlas.size() == 1024u * 256u) {
+        propVersion = gpu.propAtlasVersion;
+        glBindTexture(GL_TEXTURE_2D, propTex);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 256, GL_RED_INTEGER, GL_UNSIGNED_SHORT, gpu.propAtlas.data());
+    }
     textHres = gpu.hres;
     gpuAreaLeft = float(gpu.displayX); gpuAreaWidth = float(gpu.hres);
     replay(gpu.cmds, gpu.textPool, &gpu.cmdPool);

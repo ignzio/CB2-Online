@@ -52,6 +52,9 @@ struct Animation {
     std::vector<AnimFrame> frames;
 };
 
+// The texture description of polygon texture number `texId` (1-based; `animated` ones follow the model's flipbook table at `frame`); nullptr when the polygon has none.
+const TexInfo* resolveModelTexture(const Model& m, int texId, bool animated, int frame);
+
 std::optional<Model> parseModel(const Entry& e);
 std::optional<Animation> parseAnimation(const Entry& e);
 
