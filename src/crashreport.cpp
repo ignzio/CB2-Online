@@ -5,6 +5,8 @@
 #include <csignal>
 #include <cstdarg>
 #include <cstdio>
+#include <fcntl.h>
+#include <io.h>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -465,12 +467,25 @@ void install(const std::string& dir, const std::string& version) {
         InitializeCriticalSection(&gLogLock);
         gLogLockReady = true;
         gLog = CreateFileA(gLogPath, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        // a program without a console has no stderr: what the game prints there goes to the log instead
-        const HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
-        if (gLog != INVALID_HANDLE_VALUE && (!err || err == INVALID_HANDLE_VALUE)) {
-            FILE* f = nullptr;
-            if (freopen_s(&f, gLogPath, "a", stderr) == 0) std::setvbuf(stderr, nullptr, _IONBF, 0);
-        }
+        // a program without a console has no stdout and no stderr (a printf to them is "an invalid parameter" to the C runtime, which ended the game): what the game prints goes to the log instead.
+        // The C runtime's own idea of the stream decides (not the operating system's handle: a program started without a console can have a handle the runtime did not take).
+        int redirectError[2] = {0, 0};
+        if (gLog != INVALID_HANDLE_VALUE) {
+            FILE* const streams[2] = {stdout, stderr};
+            for (int k = 0; k < 2; ++k) {
+                if (_fileno(streams[k]) >= 0) continue;
+                // a handle of its own for the stream (the log's own stays open for log()), opened for appending
+                HANDLE h = INVALID_HANDLE_VALUE;
+                if (!DuplicateHandle(GetCurrentProcess(), gLog, GetCurrentProcess(), &h, 0, FALSE, DUPLICATE_SAME_ACCESS)) { redirectError[k] = int(GetLastError()); continue; }
+                const int fd = _open_osfhandle(intptr_t(h), _O_APPEND | _O_TEXT);
+                if (fd < 0) { redirectError[k] = -1; CloseHandle(h); continue; }
+                FILE* f = nullptr;
+                if (freopen_s(&f, "NUL", "w", streams[k]) != 0 || _fileno(streams[k]) < 0) { redirectError[k] = -2; _close(fd); continue; }   // re-attach the stream to a descriptor ...
+                if (_dup2(fd, _fileno(streams[k])) != 0) redirectError[k] = -3;                                                              // ... and point that descriptor at the log
+                _close(fd);
+                std::setvbuf(streams[k], nullptr, _IONBF, 0);
+            }
+        }        log("streams: stdout fd %d, stderr fd %d (redirect errors %d %d)", _fileno(stdout), _fileno(stderr), redirectError[0], redirectError[1]);
         char cmd[600];
         std::snprintf(cmd, sizeof cmd, "%s", GetCommandLineA());
         log("CB2-Online %s started", version.c_str());

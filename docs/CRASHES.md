@@ -15,6 +15,10 @@ The game keeps records so that a crash that happens "all of a sudden" can be und
 The next start still notices (a lock file `running-<pid>.lock` was left behind) and offers the report with the **last known state and the last events** from `cb2-session.log`. If the log ends with a normal line and no `session ended cleanly`,
 something outside the game ended the process; the module list and the graphics card at the top of the log are the first things to look at.
 
+## A fixed cause of sudden closes
+
+Versions up to 0.8.5 could end with *"invalid parameter passed to the C runtime"* the first time the game printed a message (for example when the props loaded Turtle Woods, or when joining an online room): the windowed program has no console, so `stdout` did not exist and the C runtime treats a write to it as an error. The program now attaches `stdout` and `stderr` to `cb2-session.log` at start; the first line of that log says `streams: stdout fd .., stderr fd ..`.
+
 ## For players: sending a report
 
 The next start after a crash asks *"The game closed unexpectedly last time. Open a bug report?"*. Say yes: the browser opens an issue with the version, system, graphics card, settings and the last events filled in, and Explorer opens the game folder with

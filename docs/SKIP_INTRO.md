@@ -20,7 +20,7 @@ The scene is played by the game's own scripts, which wait for it to end. Leaving
 
 ## When it does not happen
 
-* The memory card already has a Crash 2 save: you have the title screen's *Continue*, which is where you want to be, and a game that did not go through it must not write a new save over yours.
+* (A memory card that already has saves does **not** stop it: the game starts in the warp room, with the progress of a new game on screen. The game saves only when you choose a slot on its save screen, so your saves are not touched unless you do that. If you want the title screen with *Continue*, switch the option off.)
 * A save state, a scripted press, `--autostart` or `--native` decide where the game starts.
 * You switch it off in the menu (from the next start) or in `cb2.cfg`.
 

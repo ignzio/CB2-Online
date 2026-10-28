@@ -759,13 +759,10 @@ int main(int argc, char** argv) {
     }
     // Skip the intro (docs/SKIP_INTRO.md). The game's main() opens a first level, 0x3C (the logos and the title), with `ori a0, zero, 0x3C`; the instruction is patched in memory to open the warp
     // room (level 2) instead, so a new game starts there. This is the same one-byte change a modified executable would have, but nothing on the disc or in a file is changed.
-    // Not when anything else decides where the game starts (a state, a script), nor when the memory card already has a save: that player has the title screen's Continue, which is
-    // what loads a saved game, and a game that did not go through it must not write a new one over it.
+    // Not when anything else decides where the game starts (a state, a script). A memory card with saves does not stop it (the game saves only when the player chooses a slot); the menu switch turns it off.
     {
-        bool cardHasSave = false;
-        for (int b = 1; b <= 15; ++b) if (p.card.image()[size_t(b) * psx::MemCard::kFrame] == 0x51) cardHasSave = true;
         const bool scripted = (!loadStatePath.empty() || autoStart || !pressList.empty() || saveStateFrame || nativeCode || p.frames > 100) && !std::getenv("CB2_FORCESKIP");
-        if (settings.skipIntro && !scripted && !cardHasSave && (interactiveSession || std::getenv("CB2_FORCESKIP"))) {
+        if (settings.skipIntro && !scripted && (interactiveSession || std::getenv("CB2_FORCESKIP"))) {
             const uint32_t insn = release.bootLevelInsn;
             p.addHook(insn - 4, [insn](psx::Platform& pl) { if (pl.peek32(insn) == 0x3404003Cu) pl.poke32(insn, 0x34040002u); });   // runs before the jal and its delay slot
             std::printf("skip intro: the game will open the warp room first\n");

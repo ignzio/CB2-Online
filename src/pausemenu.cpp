@@ -419,7 +419,7 @@ void PauseMenu::draw(double t) {
             case kPerspective: return {"STRAIGHT TEXTURES ON SLANTED SURFACES", "THE CONSOLE'S WOBBLE IS GONE", false};
             case kSmooth: return {"UNSTABLE: IN-BETWEEN PICTURES FOR SMOOTHER MOTION", "BEST ON A HIGH REFRESH RATE MONITOR. CAN SHOW GLITCHES", true};
             case kVsync: return {"WAIT FOR THE MONITOR: NO TEARING", "OFF: FASTER REPLIES, THE PICTURE MAY TEAR", false};
-            case kSkipIntro: return {"A NEW GAME STARTS IN THE WARP ROOM", "FROM THE NEXT START. NOT WITH A SAVED GAME ON THE CARD", false};
+            case kSkipIntro: return {"A NEW GAME STARTS IN THE WARP ROOM", "FROM THE NEXT START. SWITCH IT OFF TO SEE THE TITLE", false};
             case kProps: return {"UNSTABLE: A BOUNCY CRATE IN THE WARP ROOM", "NOT PART OF THE ROOM. JUMP ON IT TO BOUNCE", true};
             case kNative: return {"UNSTABLE: DRAWS THE LEVEL FROM ITS FILES", "IT CAN FLICKER OR MISS PARTS. OFF IS THE SAFE CHOICE", true};
             case kTags: return {"THE NAMES OVER THE OTHER PLAYERS", "", false};
