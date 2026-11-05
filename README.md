@@ -1,5 +1,9 @@
 # CB2-Online
 
+<img width="336" height="48" alt="image" src="https://github.com/user-attachments/assets/00de4f20-eb95-4d5d-8eef-6776029f7bf2" />
+
+
+
 **Crash Bandicoot 2 with online multiplayer.** Play the original game, level by level, together with your friends: everybody who is in the same
 room appears in your game as an extra Crash with a name tag, in the same level, in real time. Add level timers and personal records, a live
 player list, 60 fps smoothing and an in-game menu, and you have a game built for racing and speedrunning together.
@@ -231,7 +235,8 @@ milestones; see [docs/WEBSITE.md](docs/WEBSITE.md).
 - The end of a level is detected through the game's own "go to the next level" request; it is verified for entering a level, and a real level end has not been
   captured yet ([docs/SPEEDRUN.md](docs/SPEEDRUN.md)). Please report a finished level that is not counted.
 - Loads are about 15 times shorter than on a console (`disc_speed`); what remains is the game's own work. If the game still freezes (black picture, window answers) it goes back a few seconds on its own after three seconds ([freeze watchdog](docs/PERFORMANCE.md#the-freeze-watchdog)); please report where it happened (the bug report button includes the details).
-- The game uses no CD audio, reverb, noise or pitch modulation in anything tested; reverb is implemented anyway (everb = off to leave it out), noise and pitch modulation are not.
+- The game uses no CD audio, reverb, noise or pitch modulation in anything tested; reverb is implemented anyway (
+everb = off to leave it out), noise and pitch modulation are not.
 - Versions 0.3 and 0.4+ do not see each other online (the network format changed in 0.4).
 
 ## Legal
