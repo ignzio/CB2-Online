@@ -1,5 +1,7 @@
 # CB2-Online
 
+[Visit the CB2-Online website](https://ignaziogandolfo.dev/CB2-Online/) for downloads, screenshots and the install guide.
+
 **Crash Bandicoot 2 with online multiplayer.** Play the original game, level by level, together with your friends: everybody who is in the same
 room appears in your game as an extra Crash with a name tag, in the same level, in real time. Add level timers and personal records, a live
 player list, 60 fps smoothing and an in-game menu, and you have a game built for racing and speedrunning together.

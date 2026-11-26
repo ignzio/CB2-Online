@@ -3,6 +3,48 @@
   var $ = function (id) { return document.getElementById(id); };
   var repoUrl = "https://github.com/" + cfg.repo;
 
+  var stage = document.querySelector(".hero-stage");
+  var motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var pointerFrame = 0;
+  stage.addEventListener("pointermove", function (event) {
+    if (event.pointerType !== "mouse" || motion.matches) return;
+    var bounds = stage.getBoundingClientRect();
+    var x = ((event.clientX - bounds.left) / bounds.width - 0.5) * 12;
+    var y = ((event.clientY - bounds.top) / bounds.height - 0.5) * 12;
+    cancelAnimationFrame(pointerFrame);
+    pointerFrame = requestAnimationFrame(function () {
+      stage.style.setProperty("--pointer-x", x + "px");
+      stage.style.setProperty("--pointer-y", y + "px");
+    });
+  });
+  stage.addEventListener("pointerleave", function () {
+    cancelAnimationFrame(pointerFrame);
+    stage.style.removeProperty("--pointer-x");
+    stage.style.removeProperty("--pointer-y");
+  });
+  stage.querySelectorAll(".float-object").forEach(function (object) {
+    object.addEventListener("click", function () {
+      if (motion.matches) return;
+      object.classList.remove("is-popping");
+      void object.offsetWidth;
+      object.classList.add("is-popping");
+    });
+    object.addEventListener("animationend", function (event) {
+      if (event.animationName === "pop") object.classList.remove("is-popping");
+    });
+  });
+
+  document.querySelector(".video-preview").addEventListener("click", function (event) {
+    event.preventDefault();
+    var player = document.createElement("iframe");
+    player.src = "https://www.youtube-nocookie.com/embed/nvLL3Ua1Poc?autoplay=1";
+    player.title = "CB2-Online launch trailer";
+    player.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+    player.allowFullscreen = true;
+    this.replaceWith(player);
+    player.focus();
+  });
+
   $("repo-link").href = repoUrl + "/releases";
   $("issues-link").href = repoUrl + "/issues";
   $("dl-all").href = repoUrl + "/releases";

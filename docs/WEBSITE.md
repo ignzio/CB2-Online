@@ -1,7 +1,6 @@
 # The website and the public home of the project
 
-The page is served by **GitHub Pages** straight from this repository: **Settings > Pages > Source: Deploy from a branch > `main` / `/docs`**. GitHub Pages only offers the repository root (`/`) or `/docs`, so
-the site lives in `docs/` next to the documentation:
+The public repository's GitHub Pages source is **`main` / `/docs`**. GitHub Pages only offers the repository root (`/`) or `/docs`, so the website files must be in the public repository's root `docs/` directory:
 
 | File | What |
 |---|---|
@@ -10,9 +9,14 @@ the site lives in `docs/` next to the documentation:
 | `docs/app.js` | reads the latest release from the GitHub API and draws the milestone bars and donation buttons |
 | `docs/config.js` | the repository, donation links, amount raised and the milestones |
 | `docs/img/` | screenshots (shared with the README) |
+| `docs/sitemap.xml` | the canonical page URL for search engines |
 | `docs/.nojekyll` | tells Pages not to run Jekyll, so the Markdown documents next to the page are served as they are |
 
-Deploying is pushing to `main`: Pages rebuilds `docs/` within a minute or two. Nothing else to run.
+This checkout stores the website under `cb2-viewer/docs/`, not the repository-root `docs/` configured for Pages. Publishing changes from this checkout requires transferring the website files to the public repository's `docs/` directory and deploying them on its configured branch; simply pushing the nested directory will not update the site. Preserve the public repository's other documentation when transferring files.
+
+## Search visibility
+
+The canonical address is `https://ignaziogandolfo.dev/CB2-Online/` (the GitHub Pages address redirects there). If the domain changes, update the canonical URL, Open Graph URLs and structured data in `index.html`, and the URL in `sitemap.xml`. After deploying, confirm that both the page and `https://ignaziogandolfo.dev/CB2-Online/sitemap.xml` return HTTP 200; the sitemap returned 404 when checked on 26 November 2026. Verify the site in Google Search Console, submit that sitemap URL and use URL Inspection to request indexing. A sitemap can also be advertised in the domain's root `robots.txt`, if you control that file; a `robots.txt` inside `/CB2-Online/` will not control the domain. Search engines decide when to index and rank the site, so these changes do not guarantee a particular ranking.
 
 Where everything lives:
 
@@ -31,6 +35,10 @@ paid plan (and then serves the page publicly anyway, but the downloads would sti
 
 `docs/index.html` (text, including the "Where this is going" section), `docs/style.css`, `docs/config.js` (repository, donation links, amounts and the milestones). Screenshots are in `docs/img/`; replace them or add
 footage (a `<video>` in the hero works well). Open `docs/index.html` in a browser to preview it (or `python -m http.server` in `docs/`); the download section reads the latest release live from the GitHub API.
+
+The temple background and transparent logo and object artwork are also in `docs/img/`. The fixed background provides the scrolling parallax effect, and the objects float and respond to pointer movement or activation. These effects are disabled for visitors who prefer reduced motion.
+The first quick card loads the YouTube launch trailer only when activated; its thumbnail and the multiplayer-level image are frames from that trailer. A direct YouTube link remains available if embedding is blocked.
+The illustrated Features and Install guide cards use the existing page descriptions; keep planned features in the roadmap rather than presenting them as available.
 
 Milestones (`config.js`): `status` is `done`, `active` or `planned`; `goal` is the cumulative amount that has to be raised for it; the bars follow `raised`, which you update by hand.
 The current list: online multiplayer (done), native world renderer (in progress), speedrun multiplayer, dedicated servers, native water/ice, co-op mode, skins, level editor, custom levels, freeroam. Goals are in US dollars (what GitHub Sponsors pays in).
