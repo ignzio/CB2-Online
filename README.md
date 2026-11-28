@@ -1,3 +1,6 @@
+[![Listed on Decomp Buddy](https://decompbuddy.com/badge.svg)](https://decompbuddy.com/games/crash-bandicoot-2-cortex-strikes-back-cb2-online-playstation)
+[![Listed on PlayPorted](https://playported.com/badge.svg)](https://playported.com/ports/935-crash-bandicoot-2-cortex-strikes-back/)
+
 # CB2-Online
 
 **Crash Bandicoot 2 with online multiplayer.** Play the original game, level by level, together with your friends: everybody who is in the same
